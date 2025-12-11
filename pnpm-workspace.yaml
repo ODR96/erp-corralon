@@ -1,0 +1,10 @@
+packages:
+  - apps/*
+
+ignoredBuiltDependencies:
+  - esbuild
+  - unrs-resolver
+
+onlyBuiltDependencies:
+  - '@nestjs/core'
+  - bcrypt
