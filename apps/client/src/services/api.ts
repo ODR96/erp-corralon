@@ -102,6 +102,59 @@ export const branchesService = {
     }
 };
 
+export const inventoryService = {
+    // Auxiliares
+    getCategories: async () => {
+        const token = localStorage.getItem('token');
+        const response = await api.get('/inventory/categories', { headers: { Authorization: `Bearer ${token}` } });
+        return response.data;
+    },
+    getUnits: async () => {
+        const token = localStorage.getItem('token');
+        const response = await api.get('/inventory/units', { headers: { Authorization: `Bearer ${token}` } });
+        return response.data;
+    },
+    getProviders: async () => { // <--- NUEVO
+        const token = localStorage.getItem('token');
+        const response = await api.get('/inventory/providers', { headers: { Authorization: `Bearer ${token}` } });
+        return response.data;
+    },
+
+    // Productos (CRUD Completo)
+    getProducts: async (page = 1, limit = 10, search = '', categoryId = '', providerId = '', withDeleted = false) => {
+        const token = localStorage.getItem('token');
+        const response = await api.get('/inventory/products', {
+            // Axios arma la query string automáticamente con estos params
+            params: { page, limit, search, categoryId, providerId, withDeleted },
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        return response.data;
+    },
+    createProduct: async (data: any) => {
+        const token = localStorage.getItem('token');
+        const response = await api.post('/inventory/products', data, { headers: { Authorization: `Bearer ${token}` } });
+        return response.data;
+    },
+    updateProduct: async (id: string, data: any) => {
+        const token = localStorage.getItem('token');
+        const response = await api.patch(`/inventory/products/${id}`, data, { headers: { Authorization: `Bearer ${token}` } });
+        return response.data;
+    },
+    deleteProduct: async (id: string, hard: boolean = false) => {
+        const token = localStorage.getItem('token');
+        // Axios permite pasar 'params' que se convierten en ?hard=true
+        await api.delete(`/inventory/products/${id}`, {
+            params: { hard }, // <--- ESTO FALTABA O ESTABA MAL
+            headers: { Authorization: `Bearer ${token}` }
+        });
+    },
+
+    restoreProduct: async (id: string) => {
+        const token = localStorage.getItem('token');
+        await api.patch(`/inventory/products/${id}/restore`, {}, { headers: { Authorization: `Bearer ${token}` } });
+    }
+};
+
 export const settingsService = {
     get: async () => {
         const token = localStorage.getItem('token');

@@ -9,6 +9,8 @@ import { User } from '../users/entities/user.entity';
 import { Role } from '../auth/entities/role.entity';
 import { Permission } from '../auth/entities/permission.entity';
 import { MeasurementUnit } from '../inventory/entities/measurement-unit.entity';
+import { Category } from '../inventory/entities/category.entity';
+
 
 
 @Injectable()
@@ -20,6 +22,7 @@ export class SeedService implements OnModuleInit {
         @InjectRepository(Role) private roleRepo: Repository<Role>,
         @InjectRepository(Permission) private permRepo: Repository<Permission>,
         @InjectRepository(MeasurementUnit) private unitsRepo: Repository<MeasurementUnit>,
+        @InjectRepository(Category) private categoryRepo: Repository<Category>,
     ) { }
 
     async onModuleInit() {
@@ -28,14 +31,9 @@ export class SeedService implements OnModuleInit {
 
     async seed() {
         // Verificamos si ya existen tenants para no duplicar
-        const count = await this.tenantRepo.count();
-        if (count > 0) {
-            console.log('✅ La base de datos ya tiene datos. Seed omitido.');
-            return;
-        }
-
+        
         console.log('🌱 Iniciando Seeding completo (Con Roles)...');
-
+        
         const unitsCount = await this.unitsRepo.count();
         if (unitsCount === 0) {
             console.log('🌱 Creando Unidades de Medida básicas...');
@@ -48,7 +46,12 @@ export class SeedService implements OnModuleInit {
                 { name: 'Litro', short_name: 'l', allow_decimals: true },
             ]);
         };
-
+        
+        const count = await this.tenantRepo.count();
+        if (count > 0) {
+            console.log('✅ La base de datos ya tiene datos. Seed omitido.');
+            return;
+        }
         // 1. Crear el Tenant
         const tenant = this.tenantRepo.create({
             name: 'Corralón Demo',
@@ -107,6 +110,23 @@ export class SeedService implements OnModuleInit {
             role: suadminRole, // <--- Aquí está la clave: Asignamos el rol
         });
         await this.userRepo.save(user);
+
+        //tenant = await this.tenantRepo.findOne({ where: { slug: 'corralon-demo' } });
+
+        if (tenant) {
+            const catCount = await this.categoryRepo.count({ where: { tenant: { id: tenant.id } } });
+            if (catCount === 0) {
+                console.log('🌱 Creando Categorías Básicas...');
+                await this.categoryRepo.save([
+                    { name: 'General', tenant },
+                    { name: 'Materiales de Construcción', tenant },
+                    { name: 'Herramientas', tenant },
+                    { name: 'Electricidad', tenant },
+                    { name: 'Plomería', tenant },
+                    { name: 'Pinturería', tenant },
+                ]);
+            }
+        }
 
         console.log('🚀 SEED COMPLETADO: Admin creado con Rol Super Admin');
     }

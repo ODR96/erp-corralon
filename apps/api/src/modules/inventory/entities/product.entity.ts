@@ -2,22 +2,27 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 import { Tenant } from '../../tenants/entities/tenant.entity';
 import { Category } from './category.entity';
 import { MeasurementUnit } from './measurement-unit.entity';
+import { Provider } from './provider.entity';
 
 @Entity('products')
 export class Product {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 
+    // --- DATOS BÁSICOS ---
     @Column('text')
-    name: string; // "Cemento Portland"
+    name: string;
 
     @Column('text', { nullable: true })
     description: string;
 
-    @Column('text', { nullable: true }) // SKU / Código de barras
+    @Column('text', { nullable: true })
     sku: string;
 
-    // RELACIONES
+    @Column('text', { nullable: true })
+    barcode: string; // Código de barras
+
+    // --- RELACIONES ---
     @ManyToOne(() => Category)
     @JoinColumn({ name: 'category_id' })
     category: Category;
@@ -26,33 +31,47 @@ export class Product {
     @JoinColumn({ name: 'unit_id' })
     unit: MeasurementUnit;
 
+    @ManyToOne(() => Provider, (provider) => provider.products)
+    @JoinColumn({ name: 'provider_id' })
+    provider: Provider;
+
     @ManyToOne(() => Tenant)
     @JoinColumn({ name: 'tenant_id' })
     tenant: Tenant;
 
-    // PRECIOS BASE (Luego haremos listas de precios avanzadas)
-    @Column('decimal', { precision: 10, scale: 2, default: 0 })
-    cost_price: number; // Costo
+    // --- PRECIOS Y COSTOS ---
+    @Column('text', { default: 'ARS' })
+    currency: string; // <--- AQUÍ ESTABA EL CULPABLE
 
     @Column('decimal', { precision: 10, scale: 2, default: 0 })
-    sale_price: number; // Precio Venta
+    list_price: number; // Precio de lista proveedor
 
-    @Column('decimal', { precision: 5, scale: 2, default: 21.00 })
-    vat_rate: number; // IVA particular de este producto
+    @Column('decimal', { precision: 10, scale: 2, default: 0 })
+    provider_discount: number; // Descuento %
 
-    // ALERTAS
+    @Column('decimal', { precision: 10, scale: 2, default: 0 })
+    cost_price: number; // Costo real
+
+    @Column('decimal', { precision: 10, scale: 2, default: 0 })
+    profit_margin: number; // Margen %
+
+    @Column('decimal', { precision: 10, scale: 2, default: 0 })
+    vat_rate: number; // IVA %
+
+    @Column('decimal', { precision: 10, scale: 2, default: 0 })
+    sale_price: number; // Precio Final
+
+    // --- CONTROL ---
     @Column('int', { default: 0 })
-    min_stock_alert: number; // Avisar si baja de X cantidad
+    min_stock_alert: number;
+
+    @Column('jsonb', { nullable: true })
+    attributes: Record<string, any>;
 
     @Column('boolean', { default: true })
     is_active: boolean;
 
-    @CreateDateColumn()
-    created_at: Date;
-
-    @UpdateDateColumn()
-    updated_at: Date;
-
-    @DeleteDateColumn()
-    deleted_at: Date;
+    @CreateDateColumn() created_at: Date;
+    @UpdateDateColumn() updated_at: Date;
+    @DeleteDateColumn() deleted_at: Date;
 }

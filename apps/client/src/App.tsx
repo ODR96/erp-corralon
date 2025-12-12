@@ -10,6 +10,7 @@ import { ProfilePage } from './pages/ProfilePage';
 import { BranchesPage } from "./pages/BranchesPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { SettingsPage } from "./pages/SettingPage";
+import { ProductsPage } from "./pages/ProductosPage";
 
 const DashboardPage = () => (
   <Typography variant="h4">Bienvenido al Dashboard</Typography>
@@ -37,6 +38,7 @@ function App() {
               <Route path="/" element={<DashboardPage />} />
               <Route path="/users" element={<UsersPage />} />
               <Route path="/profile" element={<ProfilePage />} />{" "}
+              <Route path="/inventory" element={<ProductsPage />} />
               <Route path="/branches" element={<BranchesPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               {/* <--- Próximo paso */}

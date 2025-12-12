@@ -14,4 +14,8 @@ export class UpdateConfigDto {
     @IsOptional() @IsString() tax_id?: string;
 
     @IsOptional() @IsString() fantasy_name?: string;
+
+    @IsOptional() @IsNumber() exchange_rate?: number;
+
+    @IsOptional() @IsNumber() price_rounding?: number;
 }

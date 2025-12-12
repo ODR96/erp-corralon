@@ -21,6 +21,12 @@ export class TenantConfig {
     @Column('decimal', { precision: 5, scale: 2, default: 30.00 })
     default_profit_margin: number; // Margen ganancia sugerido
 
+    @Column('decimal', { precision: 10, scale: 2, default: 0 })
+    exchange_rate: number;
+
+    @Column('int', { default: 0 }) // 0 = Exacto, 10 = Redondeo a 10, etc.
+    price_rounding: number;
+
     // --- REGLAS DE NEGOCIO ---
     @Column('boolean', { default: false })
     allow_negative_stock: boolean; // ¿Vender sin stock?
