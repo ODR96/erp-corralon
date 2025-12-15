@@ -1,179 +1,140 @@
-import { Injectable, NotFoundException, ConflictException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Not, ILike } from 'typeorm';
-import * as bcrypt from 'bcrypt';
+import { Repository, ILike } from 'typeorm';
 import { User } from './entities/user.entity';
-import { Role } from '../auth/entities/role.entity'; // Importamos Role
-import { Branch } from '../tenants/entities/branch.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { Tenant } from '../tenants/entities/tenant.entity';
+import { Role } from '../auth/entities/role.entity'; // Asegúrate de importar Role
+import * as bcrypt from 'bcrypt';
+import { Branch } from '../tenants/entities/branch.entity';
 
 @Injectable()
 export class UsersService {
     constructor(
-        @InjectRepository(User) private userRepository: Repository<User>,
-        @InjectRepository(Role) private roleRepository: Repository<Role>,
-        @InjectRepository(Branch) private branchRepository: Repository<Branch>,
+        @InjectRepository(User) private userRepo: Repository<User>,
+        @InjectRepository(Role) private roleRepo: Repository<Role>,
+        @InjectRepository(Branch) private branchRepo: Repository<Branch>,
     ) { }
 
-    // 1. LISTAR (Ahora acepta ver eliminados)
-    async findAll(
-        tenantId: string,
-        limit: number,
-        offset: number,
-        search: string,
-        withDeleted: boolean = false,
-        requesterRole: string
-    ) {
-        // 1. Definimos las condiciones BASE (que siempre se deben cumplir)
-        const baseConditions: any = {
-            tenant: { id: tenantId }
-        };
+    // 1. CREATE
+    async create(createDto: CreateUserDto, tenant: Tenant, requesterRole?: Role) {
+        const existing = await this.userRepo.findOne({ where: { email: createDto.email } });
+        if (existing) throw new BadRequestException('El email ya está registrado');
 
-        // Filtro de Seguridad de Roles (Nadie ve al Super Admin salvo él mismo)
-        if (requesterRole !== 'Super Admin') {
-            baseConditions.role = { name: Not('Super Admin') };
+        const hashedPassword = await bcrypt.hash(createDto.password, 10);
+
+        // FIX: Usamos roleId (camelCase) como viene en el DTO
+        const roleToAssign = await this.roleRepo.findOne({ where: { id: createDto.roleId } });
+        if (!roleToAssign) throw new BadRequestException('El rol seleccionado no existe');
+
+        let branchToAssign: Branch | null = null;        // FIX: Usamos branchId (camelCase)
+        if (createDto.branchId) {
+            branchToAssign = await this.branchRepo.findOne({ where: { id: createDto.branchId } });
         }
 
-        // 2. Construimos el WHERE final
-        let where: any = baseConditions;
+        const newUser = this.userRepo.create({
+            full_name: createDto.full_name,
+            email: createDto.email,
+            password_hash: hashedPassword,
+            tenant: tenant,
+            role: roleToAssign,
+            branch: branchToAssign,
+            is_active: true
+        });
 
+        return this.userRepo.save(newUser);
+    }
+
+    // 2. FIND ALL
+    async findAll(page: number, limit: number, tenantId: string, search: string, withDeleted: boolean) {
+        const skip = (page - 1) * limit;
+
+        const where: any = { tenant: { id: tenantId } };
         if (search) {
-            // MAGIA DE TYPEORM: Para hacer un "OR" (Nombre O Email) manteniendo el Tenant,
-            // debemos pasar un array de objetos. Cada objeto es una condición "OR".
-            where = [
-                {
-                    ...baseConditions, // Mantiene tenant y rol
-                    full_name: ILike(`%${search}%`) // <--- ILike ignora mayúsculas/minúsculas
-                },
-                {
-                    ...baseConditions, // Mantiene tenant y rol
-                    email: ILike(`%${search}%`)     // <--- También busca en el email
-                }
-            ];
+            where.full_name = ILike(`%${search}%`);
         }
 
-        const [data, total] = await this.userRepository.findAndCount({
-            where: where,
-            withDeleted: withDeleted,
-            relations: ['role', 'tenant', 'branch'],
-            order: { created_at: 'DESC' },
+        const [data, total] = await this.userRepo.findAndCount({
+            where,
+            relations: ['role', 'branch'],
             take: limit,
-            skip: offset,
-            select: {
-                id: true, full_name: true, email: true, is_active: true, created_at: true, deleted_at: true,
-                role: { id: true, name: true },
-                tenant: { id: true, name: true },
-                branch: { id: true, name: true }
-            }
+            skip: skip,
+            order: { created_at: 'DESC' },
+            withDeleted: withDeleted
         });
 
         return { data, total };
     }
 
-    // 2. CREAR USUARIO
-    async create(createUserDto: CreateUserDto, tenantId: string, requesterRole: string) {
-        // Buscamos incluso entre los borrados (withDeleted: true)
-        const exists = await this.userRepository.findOne({
-            where: { email: createUserDto.email },
-            withDeleted: true
+    // 3. FIND ONE
+    async findOne(id: string) {
+        const user = await this.userRepo.findOne({
+            where: { id },
+            relations: ['role', 'branch']
         });
-
-        if (exists) {
-            if (exists.deleted_at) {
-                // CASO: El usuario existía, fue borrado y queremos usar el email de nuevo.
-                // Opción A: Le decimos "Ese usuario está en la papelera, restáurelo".
-                // Opción B (La que haremos): Reactivarlo automáticamente.
-                throw new ConflictException('Este usuario existía y fue eliminado. Contacte a soporte para restaurarlo.');
-            }
-            throw new ConflictException('El email ya está en uso por un usuario activo');
-        }
-
-        // Buscar el Rol
-        const role = await this.roleRepository.findOne({ where: { id: createUserDto.roleId } });
-        if (!role) throw new NotFoundException('Rol no encontrado');
-        if (role.name === 'Super Admin' && requesterRole !== 'Super Admin') {
-            throw new ForbiddenException('No tienes permisos para crear un Super Administrador');
-        }
-
-        // BUSCAR SUCURSAL (Validar que pertenezca al mismo Tenant)
-        let branch: Branch | null = null;
-        if (createUserDto.branchId) {
-            branch = await this.branchRepository.findOne({
-                where: { id: createUserDto.branchId, tenant: { id: tenantId } }
-            });
-            if (!branch) throw new NotFoundException('Sucursal no válida');
-        }
-
-        // Hashear password
-        const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
-
-        const newUser = this.userRepository.create({
-            ...createUserDto,
-            password_hash: hashedPassword,
-            tenant: { id: tenantId }, // Asignamos al mismo Tenant del admin creador
-            role: role,
-            branch: branch,
-        });
-
-        return this.userRepository.save(newUser);
+        if (!user) throw new NotFoundException('Usuario no encontrado');
+        return user;
     }
 
-    // 3. ACTUALIZAR USUARIO
-    async update(id: string, updateUserDto: UpdateUserDto) {
-        const user = await this.userRepository.findOne({ where: { id } });
-        if (!user) throw new NotFoundException('Usuario no encontrado');
+    // 4. GET BRANCHES
+    async getBranches(tenantId: string) {
+        return this.branchRepo.find({
+            where: { tenant: { id: tenantId } },
+            select: ['id', 'name']
+        });
+    }
 
-        // Si viene password nueva, la encriptamos
-        if (updateUserDto.password) {
-            user.password_hash = await bcrypt.hash(updateUserDto.password, 10);
+    async getRoles(tenantId: string) {
+        return this.roleRepo.find({
+            where: { tenant: { id: tenantId } },
+            select: ['id', 'name'], // Solo necesitamos ID y Nombre
+            order: { name: 'ASC' }
+        });
+    }
+
+    // 5. UPDATE
+    async update(id: string, dto: UpdateUserDto) {
+        const user = await this.findOne(id);
+
+        if (dto.password) {
+            user.password_hash = await bcrypt.hash(dto.password, 10);
         }
 
-        // Si viene rol nuevo
-        if (updateUserDto.roleId) {
-            const role = await this.roleRepository.findOne({ where: { id: updateUserDto.roleId } });
+        if (dto.full_name) user.full_name = dto.full_name;
+
+        // FIX: Usamos roleId (camelCase)
+        if (dto.roleId) {
+            const role = await this.roleRepo.findOneBy({ id: dto.roleId });
             if (role) user.role = role;
         }
 
-        // Actualizamos campos básicos
-        if (updateUserDto.full_name) user.full_name = updateUserDto.full_name;
-        if (updateUserDto.email) user.email = updateUserDto.email;
-        if (updateUserDto.is_active !== undefined) user.is_active = updateUserDto.is_active;
+        // FIX: Usamos branchId (camelCase)
+        if (dto.branchId) {
+            const branch = await this.branchRepo.findOneBy({ id: dto.branchId });
+            if (branch) user.branch = branch;
+        }
 
-        return this.userRepository.save(user);
+        if (dto.is_active !== undefined) user.is_active = dto.is_active;
+
+        return this.userRepo.save(user);
     }
 
-    // 4. BORRAR USUARIO
-    async remove(id: string, hard: boolean = false, currentUserId: string) { // <--- Recibimos quién pide borrar
+    // 6. REMOVE
+    async remove(id: string, hard: boolean = false, currentUserId: string) {
         if (id === currentUserId) {
-            throw new BadRequestException('No puedes eliminar tu propia cuenta.');
+            throw new BadRequestException('No puedes eliminarte a ti mismo');
         }
 
         if (hard) {
-            return this.userRepository.delete(id);
+            return this.userRepo.delete(id);
+        } else {
+            return this.userRepo.softDelete(id);
         }
-        return this.userRepository.softDelete(id);
     }
 
-    // 3. RESTAURAR
     async restore(id: string) {
-        return this.userRepository.restore(id);
-    }
-    // AUXILIAR: Listar roles disponibles para el formulario
-    async getRoles(requesterRole: string) {
-        const whereCondition: any = {};
-
-        // REGLA: Si NO soy Super Admin, oculto el rol "Super Admin" del desplegable
-        if (requesterRole !== 'Super Admin') {
-            whereCondition.name = Not('Super Admin');
-        }
-
-        return this.roleRepository.find({ where: whereCondition });
+        return this.userRepo.restore(id);
     }
 
-    async getBranches(tenantId: string) {
-        return this.branchRepository.find({
-            where: { tenant: { id: tenantId } }
-        });
-    }
 }

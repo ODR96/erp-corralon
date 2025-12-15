@@ -1,67 +1,77 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, Query, ParseIntPipe, DefaultValuePipe } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, Query } from '@nestjs/common'; // <--- Agregamos Query
 import { UsersService } from './users.service';
-import { AuthGuard } from '@nestjs/passport';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { Roles } from '../auth/decorators/roles.decorator'; // <--- IMPORTAR
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { AuthGuard } from '@nestjs/passport';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 
 @Controller('users')
-@UseGuards(AuthGuard('jwt'), RolesGuard)
+@UseGuards(AuthGuard('jwt'), PermissionsGuard)
 export class UsersController {
     constructor(private readonly usersService: UsersService) { }
 
+    @Post()
+    @RequirePermissions('users.create')
+    create(@Body() createUserDto: CreateUserDto, @Request() req: any) {
+        // FIX ERROR 1: Pasamos el rol del que pide (req.user.role)
+        return this.usersService.create(createUserDto, req.user.tenant, req.user.role);
+    }
 
     @Get()
+    @RequirePermissions('users.view')
     findAll(
         @Request() req: any,
-        @Query('withDeleted') withDeleted: string,
-        // Nuevos parámetros con valores por defecto
-        @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
-        @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
-        @Query('search') search: string,
+        @Query('page') page: number = 1,      // <--- Recibimos paginación
+        @Query('limit') limit: number = 10,   // <--- Recibimos límite
+        @Query('search') search: string = '',  // <--- Recibimos búsqueda
+        @Query('withDeleted') withDeleted: string = 'false'
     ) {
-        const { tenantId, role } = req.user;
-        // Calculamos el offset
-        // Página 1: skip 0. Página 2: skip 10.
-        const offset = (page - 1) * limit;
-
-        return this.usersService.findAll(tenantId, limit, offset, search, withDeleted === 'true', role);
+        // FIX ERROR 2: Pasamos los 6 argumentos (o los que definamos en el servicio ahora)
+        // Nota: Vamos a simplificar el servicio, pero por ahora le pasamos lo vital
+        return this.usersService.findAll(Number(page), Number(limit), req.user.tenant.id, search, withDeleted === 'true');
     }
 
-    @Get('roles') // Endpoint auxiliar para llenar el Select del frontend
+    @Get('roles')
+    @RequirePermissions('users.view', 'users.create')
     getRoles(@Request() req: any) {
-        return this.usersService.getRoles(req.user.role);
+        return this.usersService.getRoles(req.user.tenant.id);
     }
 
-    @Get('branches') // Endpoint para llenar el Select de sucursales
-    @Roles('Super Admin', 'Admin')
+    // 👇 Endpoint para el dropdown de sucursales (Sin cambios, pero asegúrate que exista en el servicio)
+    @Get('branches')
+    @RequirePermissions('users.view', 'users.create')
     getBranches(@Request() req: any) {
-        return this.usersService.getBranches(req.user.tenantId);
+        return this.usersService.getBranches(req.user.tenant.id);
     }
 
-    @Post()
-    @Roles('Super Admin', 'Admin') // Permitimos a ambos entrar, pero el servicio filtra
-    create(@Body() createUserDto: CreateUserDto, @Request() req: any) {
-        const { tenantId, role } = req.user;
-        return this.usersService.create(createUserDto, tenantId, role);
+    @Get(':id')
+    @RequirePermissions('users.view')
+    findOne(@Param('id') id: string) {
+        // FIX ERROR 3: El método findOne no existía, lo crearemos en el servicio
+        return this.usersService.findOne(id);
     }
 
     @Patch(':id')
-    @Roles('Super Admin', 'Admin')
+    @RequirePermissions('users.create')
     update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
         return this.usersService.update(id, updateUserDto);
     }
 
     @Delete(':id')
-    @Roles('Super Admin', 'Admin')
-    remove(@Param('id') id: string, @Query('hard') hard: string, @Request() req: any) {
-        const currentUserId = req.user.id; // <--- Identificamos quién es
-        return this.usersService.remove(id, hard === 'true', currentUserId);
+    @RequirePermissions('users.create')
+    remove(
+        @Param('id') id: string,
+        @Query('hard') hard: string,
+        @Request() req: any
+    ) {
+        // FIX ERROR 4: Pasamos el booleano 'hard' y el ID del usuario que borra
+        const isHard = hard === 'true';
+        return this.usersService.remove(id, isHard, req.user.id);
     }
 
     @Patch(':id/restore')
-    @Roles('Super Admin', 'Admin')
+    @RequirePermissions('users.create')
     restore(@Param('id') id: string) {
         return this.usersService.restore(id);
     }

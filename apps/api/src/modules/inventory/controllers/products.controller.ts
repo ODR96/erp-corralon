@@ -1,53 +1,66 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, Request, Query, ParseIntPipe, DefaultValuePipe } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Request } from '@nestjs/common';
 import { ProductsService } from '../services/products.service';
 import { CreateProductDto } from '../dto/create-product.dto';
 import { UpdateProductDto } from '../dto/update-product.dto';
+import { AuthGuard } from '@nestjs/passport';
+
+// 👇 IMPORTAMOS LA NUEVA SEGURIDAD
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
+import { RequirePermissions } from '../../auth/decorators/permissions.decorator';
 
 @Controller('inventory/products')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), PermissionsGuard) // <--- Activamos el Guard Nuevo
 export class ProductsController {
-    constructor(private readonly service: ProductsService) { }
+    constructor(private readonly productsService: ProductsService) { }
+
+    @Post()
+    @RequirePermissions('products.manage') // Solo quien tenga permiso puede crear
+    create(@Body() createProductDto: CreateProductDto, @Request() req: any) {
+        // 👇 FIX CRÍTICO: Usamos req.user.tenant.id en lugar de req.user.tenantId
+        const tenantId = req.user.tenant?.id;
+        return this.productsService.create(createProductDto, tenantId);
+    }
 
     @Get()
+    // @RequirePermissions('stock.view') // Opcional: Podrías pedir permiso para ver
     findAll(
+        @Query('page') page: number,
+        @Query('limit') limit: number,
+        @Query('search') search: string,
+        @Query('categoryId') categoryId: string,
+        @Query('providerId') providerId: string,
+        @Query('withDeleted') withDeleted: string, // <--- Agregamos esto para el filtro
         @Request() req: any,
-        @Query('page') page: number = 1,
-        @Query('limit') limit: number = 10,
-        @Query('search') search: string = '',
-        @Query('categoryId') categoryId: string, // <--- Recibir
-        @Query('providerId') providerId: string, // <--- Recibir
-        @Query('withDeleted') withDeleted: string, // <--- Recibir
     ) {
-        return this.service.findAll(
-            req.user.tenantId,
+        // 👇 FIX CRÍTICO: El tenant ahora viene anidado
+        const tenantId = req.user.tenant?.id;
+
+        return this.productsService.findAll(
             page,
             limit,
+            tenantId,
             search,
             categoryId,
             providerId,
-            withDeleted === 'true'
+            withDeleted === 'true' // Convertimos string a boolean
         );
     }
 
-    @Post()
-    create(@Body() dto: CreateProductDto, @Request() req: any) {
-        return this.service.create(dto, req.user.tenantId);
-    }
-
     @Patch(':id')
-    update(@Param('id') id: string, @Body() dto: UpdateProductDto) { // <--- Usar UpdateProductDto
-        return this.service.update(id, dto);
+    @RequirePermissions('products.manage')
+    update(@Param('id') id: string, @Body() updateProductDto: UpdateProductDto) {
+        return this.productsService.update(id, updateProductDto);
     }
 
     @Delete(':id')
-    remove(@Param('id') id: string, @Query('hard') hard: string) {
-        // Convertimos el string 'true' a boolean true
-        return this.service.remove(id, hard === 'true');
+    @RequirePermissions('products.manage')
+    remove(@Param('id') id: string, @Query('hardDelete') hardDelete: string) {
+        return this.productsService.remove(id, hardDelete === 'true');
     }
 
     @Patch(':id/restore')
+    @RequirePermissions('products.manage')
     restore(@Param('id') id: string) {
-        return this.service.restore(id);
+        return this.productsService.restore(id);
     }
 }

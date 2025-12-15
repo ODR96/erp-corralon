@@ -23,6 +23,11 @@ import {
   Grid,
   TableContainer,
   Tooltip,
+  FormControlLabel,
+  Checkbox,
+  Stack,
+  Card,
+  CardContent,
 } from "@mui/material";
 import {
   Add,
@@ -33,9 +38,21 @@ import {
   AttachMoney,
   Clear,
   Info,
+  Inventory2,
+  TrendingUp,
+  TrendingDown,
+  RestoreFromTrash,
+  DeleteForever,
 } from "@mui/icons-material";
 import { useSnackbar } from "notistack";
 import { inventoryService, settingsService } from "../services/api";
+
+// --- ESTILOS ---
+const DELETED_ROW_STYLE = {
+  bgcolor: "#fcfcfc",
+  color: "#9e9e9e",
+  fontStyle: "italic",
+};
 
 const initialForm = {
   name: "",
@@ -58,16 +75,17 @@ const initialForm = {
 export const ProductsPage = () => {
   const { enqueueSnackbar } = useSnackbar();
 
-  // ESTADOS
+  // Estados
   const [products, setProducts] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [exchangeRate, setExchangeRate] = useState(1);
   const [roundingRule, setRoundingRule] = useState(0);
 
-  // Listas
+  // Auxiliares
   const [categories, setCategories] = useState<any[]>([]);
   const [units, setUnits] = useState<any[]>([]);
   const [providers, setProviders] = useState<any[]>([]);
+  const [branches, setBranches] = useState<any[]>([]);
 
   // Filtros
   const [page, setPage] = useState(0);
@@ -75,31 +93,36 @@ export const ProductsPage = () => {
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState("");
   const [filterProv, setFilterProv] = useState("");
+  const [withDeleted, setWithDeleted] = useState(false);
 
-  // Modal
+  // Modales
   const [open, setOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<any>(initialForm);
 
+  // Stock Modal
+  const [stockOpen, setStockOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [currentStock, setCurrentStock] = useState(0);
+  const [stockForm, setStockForm] = useState({
+    branch_id: "",
+    type: "IN",
+    quantity: "",
+    reason: "",
+  });
+
+  // --- DATA LOADING ---
   useEffect(() => {
     loadAuxData();
   }, []);
   useEffect(() => {
     loadProducts();
-  }, [page, rowsPerPage, search, filterCat, filterProv]);
+  }, [page, rowsPerPage, search, filterCat, filterProv, withDeleted]);
 
   const loadAuxData = async () => {
     try {
-      const [cats, unitsData, provs, config] = await Promise.all([
-        inventoryService.getCategories(),
-        inventoryService.getUnits(),
-        inventoryService.getProviders(),
-        settingsService.get(),
-      ]);
-      setCategories(cats);
-      setUnits(unitsData);
-      setProviders(provs);
+      const config = await settingsService.get();
       setExchangeRate(Number(config.exchange_rate) || 1);
       setRoundingRule(Number(config.price_rounding) || 0);
 
@@ -109,8 +132,25 @@ export const ProductsPage = () => {
         vat_rate: Number(config.default_vat_rate) || 21,
         currency: config.currency || "ARS",
       }));
+
+      const [cats, unitsData, provs, branchesData] = await Promise.all([
+        inventoryService.getCategories().catch(() => []),
+        inventoryService.getUnits().catch(() => []),
+        inventoryService.getProviders().catch(() => []),
+        inventoryService.getBranches().catch(() => []),
+      ]);
+
+      setCategories(cats);
+      setUnits(unitsData);
+      setProviders(provs);
+      setBranches(branchesData);
+
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      const defaultBranchId =
+        user.branch?.id || (branchesData.length > 0 ? branchesData[0].id : "");
+      setStockForm((prev) => ({ ...prev, branch_id: defaultBranchId }));
     } catch (err) {
-      console.error(err);
+      console.error("Error loading data", err);
     }
   };
 
@@ -121,7 +161,8 @@ export const ProductsPage = () => {
         rowsPerPage,
         search,
         filterCat,
-        filterProv
+        filterProv,
+        withDeleted
       );
       setProducts(res.data);
       setTotal(res.total);
@@ -130,41 +171,87 @@ export const ProductsPage = () => {
     }
   };
 
-  // --- 🧮 CALCULADORA INTELIGENTE CON REDONDEO ---
+  // --- HANDLERS ---
+  // Calculadora
   useEffect(() => {
     if (!open) return;
-
     const listPrice = Number(formData.list_price) || 0;
     const discount = Number(formData.provider_discount) || 0;
     const margin = Number(formData.profit_margin) || 0;
     const vat = Number(formData.vat_rate) || 0;
 
-    // 1. Costo
     const cost = listPrice - listPrice * (discount / 100);
-
-    // 2. Neto
     const netPrice = cost + cost * (margin / 100);
-
-    // 3. Final Matemático
     let finalPrice = netPrice + netPrice * (vat / 100);
 
-    // 4. APLICAR REDONDEO (Solo si es ARS)
-    // Regla: Redondear hacia arriba al múltiplo de 10 más cercano
-    // Ejemplo: 101 -> 110, 109 -> 110.
-    if (formData.currency === "ARS" && roundingRule > 0) {
-      // Truco matemático: Dividir, redondear techo, multiplicar.
-      // Ej: 108 / 10 = 10.8 -> Ceil(10.8) = 11 -> 11 * 10 = 110.
+    if (formData.currency === "ARS" && roundingRule > 0 && finalPrice > 10) {
       finalPrice = Math.ceil(finalPrice / roundingRule) * roundingRule;
     }
 
-setFormData((prev: any) => {
+    setFormData((prev: any) => {
       const prevCost = Number(prev.cost_price);
       const prevSale = Number(prev.sale_price);
-      if (Math.abs(prevCost - cost) < 0.01 && Math.abs(prevSale - finalPrice) < 0.01) return prev;
+      if (
+        Math.abs(prevCost - cost) < 0.01 &&
+        Math.abs(prevSale - finalPrice) < 0.01
+      )
+        return prev;
       return { ...prev, cost_price: cost, sale_price: finalPrice };
     });
-  }, [formData.list_price, formData.provider_discount, formData.profit_margin, formData.vat_rate, formData.currency, open, roundingRule]);
+  }, [
+    formData.list_price,
+    formData.provider_discount,
+    formData.profit_margin,
+    formData.vat_rate,
+    formData.currency,
+    open,
+    roundingRule,
+  ]);
 
+  // Stock
+  const handleOpenStock = async (product: any) => {
+    setSelectedProduct(product);
+    setStockOpen(true);
+    setStockForm((prev) => ({ ...prev, type: "IN", quantity: "", reason: "" }));
+    if (stockForm.branch_id) fetchStock(product.id, stockForm.branch_id);
+  };
+
+  const fetchStock = async (prodId: string, branchId: string) => {
+    try {
+      const res = await inventoryService.getStock(prodId, branchId);
+      setCurrentStock(Number(res.quantity) || 0);
+    } catch (error) {
+      setCurrentStock(0);
+    }
+  };
+
+  useEffect(() => {
+    if (stockOpen && selectedProduct && stockForm.branch_id)
+      fetchStock(selectedProduct.id, stockForm.branch_id);
+  }, [stockForm.branch_id]);
+
+  const handleStockSubmit = async () => {
+    try {
+      await inventoryService.adjustStock({
+        product_id: selectedProduct.id,
+        branch_id: stockForm.branch_id,
+        type: stockForm.type,
+        quantity: Number(stockForm.quantity),
+        reason: stockForm.reason || "Ajuste manual",
+      });
+      enqueueSnackbar("Stock actualizado correctamente", {
+        variant: "success",
+      });
+      setStockOpen(false);
+      loadProducts();
+    } catch (err: any) {
+      enqueueSnackbar(err.response?.data?.message || "Error", {
+        variant: "error",
+      });
+    }
+  };
+
+  // ABM
   const handleOpen = (product?: any) => {
     if (product) {
       setFormData({
@@ -191,7 +278,6 @@ setFormData((prev: any) => {
       const defaultUnit =
         units.find((u) => u.short_name === "u" || u.name === "Unidad")?.id ||
         "";
-
       setFormData((prev) => ({
         ...initialForm,
         currency: prev.currency || "ARS",
@@ -224,7 +310,6 @@ setFormData((prev: any) => {
         sale_price: Number(formData.sale_price),
         min_stock_alert: Number(formData.min_stock_alert),
       };
-
       if (isEditing && editingId) {
         await inventoryService.updateProduct(editingId, payload);
         enqueueSnackbar("Producto actualizado", { variant: "success" });
@@ -235,204 +320,342 @@ setFormData((prev: any) => {
       setOpen(false);
       loadProducts();
     } catch (err: any) {
-      const msg = err.response?.data?.message || "Error al guardar";
-      enqueueSnackbar(Array.isArray(msg) ? msg[0] : msg, { variant: "error" });
+      enqueueSnackbar("Error al guardar", { variant: "error" });
     }
   };
 
+  // Papelera
   const handleDelete = async (id: string) => {
     if (confirm("¿Enviar producto a papelera?")) {
+      await inventoryService.deleteProduct(id, false);
+      loadProducts();
+    }
+  };
+  const handleRestore = async (id: string) => {
+    await inventoryService.restoreProduct(id);
+    loadProducts();
+  };
+
+  // Eliminación Definitiva (Hard Delete)
+  const handleHardDelete = async (id: string) => {
+    if (
+      confirm(
+        "⚠️ ¿Estás seguro? Esto eliminará el producto y SU HISTORIAL para siempre."
+      )
+    ) {
       try {
-        await inventoryService.deleteProduct(id, false);
-        enqueueSnackbar("Producto eliminado", { variant: "success" });
+        await inventoryService.deleteProduct(id, true); // true = hard delete
+        enqueueSnackbar("Producto eliminado definitivamente", {
+          variant: "success",
+        });
         loadProducts();
-      } catch (err) {
-        enqueueSnackbar("Error", { variant: "error" });
+      } catch (err: any) {
+        enqueueSnackbar(
+          "No se puede eliminar: Probablemente tenga stock o ventas asociadas.",
+          { variant: "error" }
+        );
       }
     }
   };
 
-  // VARIABLES PARA VISUALIZACIÓN EN EL MODAL
-  const isUsd = formData.currency === "USD";
-  const costInArs = Number(formData.cost_price) * exchangeRate;
-  const priceInArs = Number(formData.sale_price) * exchangeRate;
-
+  // --- RENDER ---
   return (
     <Box>
-      <Box
-        display="flex"
+      {/* HEADER */}
+      <Stack
+        direction="row"
         justifyContent="space-between"
         alignItems="center"
         mb={3}
       >
-        <Typography variant="h4">Inventario</Typography>
+        <Box>
+          <Typography variant="h5" fontWeight="bold">
+            Inventario
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Gestión de productos y precios
+          </Typography>
+        </Box>
         <Button
           variant="contained"
           startIcon={<Add />}
           onClick={() => handleOpen()}
+          size="large"
         >
-          Nuevo
+          Nuevo Producto
         </Button>
-      </Box>
+      </Stack>
 
-      {/* FILTROS */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} md={4}>
-            <TextField
-              fullWidth
-              placeholder="Buscar..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search color="action" />
-                  </InputAdornment>
-                ),
-              }}
-              size="small"
-            />
+      {/* FILTROS CARD */}
+      <Card variant="outlined" sx={{ mb: 3 }}>
+        <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
+          <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} md={3}>
+              <TextField
+                fullWidth
+                placeholder="Buscar..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                InputProps={{
+                  startAdornment: <Search color="action" sx={{ mr: 1 }} />,
+                }}
+                size="small"
+              />
+            </Grid>
+            <Grid item xs={6} md={3}>
+              <TextField
+                select
+                fullWidth
+                label="Rubro"
+                value={filterCat}
+                onChange={(e) => setFilterCat(e.target.value)}
+                size="small"
+              >
+                <MenuItem value="">Todos los Rubros</MenuItem>
+                {categories.map((c: any) => (
+                  <MenuItem key={c.id} value={c.id}>
+                    {c.name}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+            {/* FILTRO PROVEEDOR RESTAURADO */}
+            <Grid item xs={6} md={2}>
+              <TextField
+                select
+                fullWidth
+                label="Proveedor"
+                value={filterProv}
+                onChange={(e) => setFilterProv(e.target.value)}
+                size="small"
+              >
+                <MenuItem value="">Todos</MenuItem>
+                {providers.map((p: any) => (
+                  <MenuItem key={p.id} value={p.id}>
+                    {p.name}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+            <Grid item xs={6} md={2}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={withDeleted}
+                    onChange={(e) => setWithDeleted(e.target.checked)}
+                    size="small"
+                  />
+                }
+                label={
+                  <Typography variant="body2" color="text.secondary">
+                    Ver Inactivos
+                  </Typography>
+                }
+              />
+            </Grid>
+            <Grid item xs={12} md={2}>
+              <Button
+                fullWidth
+                variant="text"
+                onClick={() => {
+                  setSearch("");
+                  setFilterCat("");
+                  setFilterProv("");
+                  setWithDeleted(false);
+                }}
+              >
+                Limpiar
+              </Button>
+            </Grid>
           </Grid>
-          <Grid item xs={6} md={3}>
-            <TextField
-              select
-              fullWidth
-              label="Rubro"
-              value={filterCat}
-              onChange={(e) => setFilterCat(e.target.value)}
-              size="small"
-              InputLabelProps={{ shrink: true }}
-            >
-              <MenuItem value="">Todos</MenuItem>
-              {categories.map((c: any) => (
-                <MenuItem key={c.id} value={c.id}>
-                  {c.name}
-                </MenuItem>
-              ))}
-            </TextField>
-          </Grid>
-          <Grid item xs={6} md={3}>
-            <TextField
-              select
-              fullWidth
-              label="Proveedor"
-              value={filterProv}
-              onChange={(e) => setFilterProv(e.target.value)}
-              size="small"
-              InputLabelProps={{ shrink: true }}
-            >
-              <MenuItem value="">Todos</MenuItem>
-              {providers.map((p: any) => (
-                <MenuItem key={p.id} value={p.id}>
-                  {p.name}
-                </MenuItem>
-              ))}
-            </TextField>
-          </Grid>
-          <Grid item xs={12} md={2}>
-            <Button
-              fullWidth
-              startIcon={<Clear />}
-              onClick={() => {
-                setSearch("");
-                setFilterCat("");
-                setFilterProv("");
-              }}
-            >
-              Limpiar
-            </Button>
-          </Grid>
-        </Grid>
-      </Paper>
+        </CardContent>
+      </Card>
 
-      {/* TABLA INVERTIDA (PESOS GRANDE) */}
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead sx={{ bgcolor: "#f5f5f5" }}>
+      {/* TABLA PRINCIPAL */}
+      <TableContainer component={Paper} variant="outlined">
+        <Table sx={{ minWidth: 650 }}>
+          <TableHead sx={{ bgcolor: "#f8f9fa" }}>
             <TableRow>
-              <TableCell>Producto</TableCell>
-              <TableCell>Categoría / Prov.</TableCell>
-              <TableCell>Unidad</TableCell>
-              <TableCell align="right">Costo Ref.</TableCell>
-              <TableCell align="right">Precio Público (ARS)</TableCell>
-              <TableCell align="right">Acciones</TableCell>
+              <TableCell>DESCRIPCIÓN</TableCell>
+              <TableCell>RUBRO</TableCell>
+              <TableCell align="center">UNIDAD</TableCell>
+              <TableCell align="right">COSTO BASE</TableCell>
+              <TableCell align="center">STOCK TOTAL</TableCell>
+              <TableCell align="right">PRECIO VENTA</TableCell>
+              <TableCell align="right">ACCIONES</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {products.map((p) => {
+              const isDeleted = !!p.deleted_at;
               const isUsdItem = p.currency === "USD";
-              const price = Number(p.sale_price);
-              const arsValue = isUsdItem ? price * exchangeRate : price;
+              const arsPrice = isUsdItem
+                ? Number(p.sale_price) * exchangeRate
+                : Number(p.sale_price);
 
               return (
-                <TableRow key={p.id}>
+                <TableRow
+                  key={p.id}
+                  sx={
+                    isDeleted
+                      ? DELETED_ROW_STYLE
+                      : { "&:hover": { bgcolor: "#f5f5f5" } }
+                  }
+                >
                   <TableCell>
-                    <Typography variant="subtitle2">{p.name}</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      SKU: {p.sku || "-"}
-                    </Typography>
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      {isDeleted && (
+                        <Chip
+                          label="INACTIVO"
+                          size="small"
+                          color="default"
+                          variant="outlined"
+                          sx={{ height: 20, fontSize: "0.6rem" }}
+                        />
+                      )}
+                      <Box>
+                        <Typography variant="subtitle2" fontWeight="bold">
+                          {p.name}
+                        </Typography>
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          display="block"
+                        >
+                          {p.provider?.name || "Sin proveedor"} • SKU:{" "}
+                          {p.sku || "-"}
+                        </Typography>
+                      </Box>
+                    </Stack>
                   </TableCell>
                   <TableCell>
                     <Chip
                       label={p.category?.name}
                       size="small"
-                      sx={{ mr: 1 }}
+                      sx={{
+                        bgcolor: "#e3f2fd",
+                        color: "#1565c0",
+                        fontWeight: 500,
+                      }}
                     />
-                    <Typography variant="caption" display="block">
-                      {p.provider?.name}
+                  </TableCell>
+                  <TableCell align="center">
+                    <Typography variant="body2" color="text.secondary">
+                      {p.unit?.short_name}
                     </Typography>
                   </TableCell>
-                  <TableCell>{p.unit?.short_name}</TableCell>
                   <TableCell align="right">
                     <Typography variant="body2" color="text.secondary">
                       {p.currency} {Number(p.cost_price).toFixed(2)}
                     </Typography>
                   </TableCell>
-
-                  {/* PRECIO INVERTIDO: SIEMPRE PESOS GRANDE */}
+                  <TableCell align="center">
+                    <Chip
+                      label={`${p.total_stock || 0} ${
+                        p.unit?.short_name || "u"
+                      }`}
+                      color={
+                        Number(p.total_stock) <= (p.min_stock_alert || 0)
+                          ? "error"
+                          : "default"
+                      }
+                      variant={
+                        Number(p.total_stock) <= (p.min_stock_alert || 0)
+                          ? "filled"
+                          : "outlined"
+                      }
+                      size="small"
+                      sx={{ fontWeight: "bold" }}
+                    />
+                  </TableCell>
                   <TableCell align="right">
                     <Typography
                       variant="subtitle1"
                       fontWeight="bold"
-                      color="success.main"
+                      color={isDeleted ? "text.disabled" : "success.main"}
                     >
                       ${" "}
-                      {arsValue.toLocaleString("es-AR", {
+                      {arsPrice.toLocaleString("es-AR", {
                         minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
                       })}
                     </Typography>
                     {isUsdItem && (
-                      <Tooltip title={`Cotización: $${exchangeRate}`}>
-                        <Chip
-                          label={`USD ${price.toFixed(2)}`}
-                          size="small"
-                          variant="outlined"
-                          sx={{
-                            height: 20,
-                            fontSize: "0.7rem",
-                            borderColor: "rgba(0,0,0,0.1)",
-                          }}
-                        />
-                      </Tooltip>
+                      <Typography
+                        variant="caption"
+                        display="block"
+                        color="text.secondary"
+                      >
+                        USD {Number(p.sale_price).toFixed(2)}
+                      </Typography>
                     )}
                   </TableCell>
-
                   <TableCell align="right">
-                    <IconButton color="primary" onClick={() => handleOpen(p)}>
-                      <Edit />
-                    </IconButton>
-                    <IconButton
-                      color="error"
-                      onClick={() => handleDelete(p.id)}
-                    >
-                      <Delete />
-                    </IconButton>
+                    {isDeleted ? (
+                      <Stack direction="row" justifyContent="flex-end">
+                        <Tooltip title="Restaurar">
+                          <IconButton
+                            size="small"
+                            color="success"
+                            onClick={() => handleRestore(p.id)}
+                          >
+                            <RestoreFromTrash fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        {/* BOTÓN ELIMINAR DEFINITIVO RESTAURADO */}
+                        <Tooltip title="Eliminar Definitivamente">
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleHardDelete(p.id)}
+                          >
+                            <DeleteForever fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Stack>
+                    ) : (
+                      <Stack direction="row" justifyContent="flex-end">
+                        <Tooltip title="Ajustar Stock">
+                          <IconButton
+                            size="small"
+                            color="warning"
+                            onClick={() => handleOpenStock(p)}
+                          >
+                            <Inventory2 fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Editar">
+                          <IconButton
+                            size="small"
+                            color="primary"
+                            onClick={() => handleOpen(p)}
+                          >
+                            <Edit fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Eliminar">
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleDelete(p.id)}
+                          >
+                            <Delete fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Stack>
+                    )}
                   </TableCell>
                 </TableRow>
               );
             })}
+            {products.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} align="center" sx={{ py: 5 }}>
+                  <Typography color="text.secondary">
+                    No se encontraron productos
+                  </Typography>
+                </TableCell>
+              </TableRow>
+            )}
           </TableBody>
         </Table>
         <TablePagination
@@ -449,7 +672,115 @@ setFormData((prev: any) => {
         />
       </TableContainer>
 
-      {/* MODAL */}
+      {/* --- MODALES --- */}
+      {/* MODAL AJUSTE DE STOCK */}
+      <Dialog
+        open={stockOpen}
+        onClose={() => setStockOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleStockSubmit();
+          }}
+        >
+          <DialogTitle>Ajuste Rápido de Stock</DialogTitle>
+          <DialogContent dividers>
+            <Grid container spacing={2} pt={1}>
+              <Grid item xs={12}>
+                <TextField
+                  select
+                  fullWidth
+                  label="Seleccionar Sucursal"
+                  value={stockForm.branch_id}
+                  onChange={(e) =>
+                    setStockForm({ ...stockForm, branch_id: e.target.value })
+                  }
+                >
+                  {branches.map((b: any) => (
+                    <MenuItem key={b.id} value={b.id}>
+                      {b.name}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Grid>
+              <Grid item xs={12}>
+                <Card
+                  variant="outlined"
+                  sx={{ bgcolor: "#f8f9fa", textAlign: "center", py: 2 }}
+                >
+                  <Typography variant="caption" color="text.secondary">
+                    STOCK DISPONIBLE
+                  </Typography>
+                  <Typography variant="h3" color="primary" fontWeight="bold">
+                    {currentStock}{" "}
+                    <Typography component="span" variant="h6">
+                      {selectedProduct?.unit?.short_name}
+                    </Typography>
+                  </Typography>
+                </Card>
+              </Grid>
+              <Grid item xs={6}>
+                <Button
+                  fullWidth
+                  variant={stockForm.type === "IN" ? "contained" : "outlined"}
+                  color="success"
+                  onClick={() => setStockForm({ ...stockForm, type: "IN" })}
+                  startIcon={<TrendingUp />}
+                >
+                  ENTRADA
+                </Button>
+              </Grid>
+              <Grid item xs={6}>
+                <Button
+                  fullWidth
+                  variant={stockForm.type === "OUT" ? "contained" : "outlined"}
+                  color="error"
+                  onClick={() => setStockForm({ ...stockForm, type: "OUT" })}
+                  startIcon={<TrendingDown />}
+                >
+                  SALIDA
+                </Button>
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  label="Cantidad"
+                  type="number"
+                  fullWidth
+                  autoFocus
+                  required
+                  value={stockForm.quantity}
+                  onChange={(e) =>
+                    setStockForm({ ...stockForm, quantity: e.target.value })
+                  }
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  label="Motivo del ajuste"
+                  fullWidth
+                  required
+                  placeholder="Ej: Compra, Rotura..."
+                  value={stockForm.reason}
+                  onChange={(e) =>
+                    setStockForm({ ...stockForm, reason: e.target.value })
+                  }
+                />
+              </Grid>
+            </Grid>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setStockOpen(false)}>Cancelar</Button>
+            <Button type="submit" variant="contained">
+              Confirmar
+            </Button>
+          </DialogActions>
+        </form>
+      </Dialog>
+
+      {/* MODAL PRODUCTO (ABM) */}
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
@@ -457,17 +788,16 @@ setFormData((prev: any) => {
         fullWidth
       >
         <form onSubmit={handleSubmit}>
-          <DialogTitle sx={{ pb: 1 }}>
+          <DialogTitle>
             {isEditing ? "Editar Producto" : "Nuevo Producto"}
             <Typography
               variant="caption"
-              display="block"
+              component="div"
               color="text.secondary"
             >
-              Complete los datos obligatorios (*)
+              Los campos con * son obligatorios
             </Typography>
           </DialogTitle>
-
           <DialogContent dividers>
             <Grid container spacing={3}>
               <Grid item xs={12}>
@@ -476,11 +806,10 @@ setFormData((prev: any) => {
                   color="primary"
                   fontWeight="bold"
                 >
-                  Identificación
+                  Datos Generales
                 </Typography>
               </Grid>
-
-              <Grid item xs={12} md={6}>
+              <Grid item xs={8}>
                 <TextField
                   label="Nombre del Producto *"
                   fullWidth
@@ -491,48 +820,37 @@ setFormData((prev: any) => {
                   }
                 />
               </Grid>
-              <Grid item xs={6} md={3}>
+              <Grid item xs={4}>
                 <TextField
-                  label="SKU / Código"
+                  label="SKU"
                   fullWidth
-                  placeholder="Ej: 001"
                   value={formData.sku}
                   onChange={(e) =>
                     setFormData({ ...formData, sku: e.target.value })
                   }
-                  InputLabelProps={{ shrink: true }}
+                  disabled={isEditing}
+                  helperText={isEditing ? "El SKU no se puede modificar" : ""}
                 />
               </Grid>
-              <Grid item xs={6} md={3}>
+              <Grid item xs={4}>
                 <TextField
-                  label="Cód. Barras"
+                  label="Código Barras"
                   fullWidth
-                  placeholder="Escanear"
                   value={formData.barcode}
                   onChange={(e) =>
                     setFormData({ ...formData, barcode: e.target.value })
                   }
-                  InputProps={{
-                    endAdornment: (
-                      <InputAdornment position="end">
-                        <QrCodeScanner color="action" fontSize="small" />
-                      </InputAdornment>
-                    ),
-                  }}
-                  InputLabelProps={{ shrink: true }}
                 />
               </Grid>
-
-              <Grid item xs={12} md={4}>
+              <Grid item xs={4}>
                 <TextField
                   select
                   fullWidth
-                  label="Rubro / Categoría"
+                  label="Rubro"
                   value={formData.category_id}
                   onChange={(e) =>
                     setFormData({ ...formData, category_id: e.target.value })
                   }
-                  InputLabelProps={{ shrink: true }}
                 >
                   {categories.map((c: any) => (
                     <MenuItem key={c.id} value={c.id}>
@@ -541,97 +859,63 @@ setFormData((prev: any) => {
                   ))}
                 </TextField>
               </Grid>
-              <Grid item xs={12} md={4}>
+              <Grid item xs={4}>
                 <TextField
                   select
                   fullWidth
-                  label="Unidad de Medida"
+                  label="Unidad"
                   value={formData.unit_id}
                   onChange={(e) =>
                     setFormData({ ...formData, unit_id: e.target.value })
                   }
-                  InputLabelProps={{ shrink: true }}
                 >
                   {units.map((u: any) => (
                     <MenuItem key={u.id} value={u.id}>
-                      {u.name} ({u.short_name})
+                      {u.name}
                     </MenuItem>
                   ))}
                 </TextField>
               </Grid>
-              <Grid item xs={12} md={4}>
-                <TextField
-                  select
-                  fullWidth
-                  label="Proveedor"
-                  value={formData.provider_id}
-                  onChange={(e) =>
-                    setFormData({ ...formData, provider_id: e.target.value })
-                  }
-                  InputLabelProps={{ shrink: true }}
+              <Grid item xs={12}>
+                <Divider />
+              </Grid>
+              <Grid item xs={12}>
+                <Typography
+                  variant="overline"
+                  color="primary"
+                  fontWeight="bold"
                 >
-                  <MenuItem value="">
-                    <em>Sin Proveedor</em>
-                  </MenuItem>
-                  {providers.map((p: any) => (
-                    <MenuItem key={p.id} value={p.id}>
-                      {p.name}
-                    </MenuItem>
-                  ))}
-                </TextField>
+                  Precios
+                </Typography>
               </Grid>
-
-              <Grid item xs={12} sx={{ mt: 1 }}>
-                <Divider textAlign="left">
-                  <Chip
-                    label="💰 Costos y Precios"
-                    size="small"
-                    icon={<Info fontSize="small" />}
-                  />
-                </Divider>
-              </Grid>
-
-              <Grid item xs={6} md={3}>
+              <Grid item xs={3}>
                 <TextField
                   select
                   fullWidth
-                  label="Moneda Compra"
+                  label="Moneda"
                   value={formData.currency}
                   onChange={(e) =>
                     setFormData({ ...formData, currency: e.target.value })
                   }
-                  InputLabelProps={{ shrink: true }}
-                  helperText={
-                    isUsd ? `Cotización: $${exchangeRate}` : "Moneda local"
-                  }
                 >
-                  <MenuItem value="ARS">🇦🇷 Pesos (ARS)</MenuItem>
-                  <MenuItem value="USD">🇺🇸 Dólares (USD)</MenuItem>
+                  <MenuItem value="ARS">ARS</MenuItem>
+                  <MenuItem value="USD">USD</MenuItem>
                 </TextField>
               </Grid>
-
-              <Grid item xs={6} md={3}>
+              <Grid item xs={3}>
                 <TextField
-                  label="Precio Lista"
+                  label="Costo Lista"
                   type="number"
                   fullWidth
                   value={formData.list_price}
                   onChange={(e) =>
                     setFormData({ ...formData, list_price: e.target.value })
                   }
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        {formData.currency === "USD" ? "US$" : "$"}
-                      </InputAdornment>
-                    ),
-                  }}
-                  InputLabelProps={{ shrink: true }}
                 />
               </Grid>
-              <Grid item xs={6} md={3}>
+              <Grid item xs={3}>
                 <TextField
-                  label="Desc. Prov."
+                  label="Desc. Prov %"
                   type="number"
                   fullWidth
                   value={formData.provider_discount}
@@ -641,123 +925,75 @@ setFormData((prev: any) => {
                       provider_discount: e.target.value,
                     })
                   }
-                  InputProps={{
-                    endAdornment: (
-                      <InputAdornment position="end">%</InputAdornment>
-                    ),
-                  }}
-                  InputLabelProps={{ shrink: true }}
                 />
               </Grid>
-              <Grid item xs={6} md={3}>
+              <Grid item xs={3}>
                 <TextField
                   label="Costo Neto"
-                  type="number"
-                  fullWidth
                   disabled
+                  fullWidth
                   value={Number(formData.cost_price).toFixed(2)}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">$</InputAdornment>
-                    ),
-                  }}
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ bgcolor: "#f5f5f5" }}
-                  helperText={
-                    isUsd
-                      ? `≈ $ ${costInArs.toLocaleString("es-AR", {
-                          minimumFractionDigits: 2,
-                        })} ARS`
-                      : ""
-                  }
                 />
               </Grid>
-
-              <Grid item xs={6} md={4}>
+              <Grid item xs={4}>
                 <TextField
-                  label="Margen Ganancia"
+                  label="Margen %"
                   type="number"
                   fullWidth
                   value={formData.profit_margin}
                   onChange={(e) =>
                     setFormData({ ...formData, profit_margin: e.target.value })
                   }
-                  InputProps={{
-                    endAdornment: (
-                      <InputAdornment position="end">%</InputAdornment>
-                    ),
-                  }}
-                  InputLabelProps={{ shrink: true }}
                 />
               </Grid>
-              <Grid item xs={6} md={4}>
+              <Grid item xs={4}>
                 <TextField
                   select
                   fullWidth
-                  label="IVA"
+                  label="IVA %"
                   value={formData.vat_rate}
                   onChange={(e) =>
                     setFormData({ ...formData, vat_rate: e.target.value })
                   }
-                  InputLabelProps={{ shrink: true }}
                 >
                   <MenuItem value={0}>0%</MenuItem>
                   <MenuItem value={10.5}>10.5%</MenuItem>
                   <MenuItem value={21}>21%</MenuItem>
-                  <MenuItem value={27}>27%</MenuItem>
                 </TextField>
               </Grid>
-              <Grid item xs={12} md={4}>
-                {/* PRECIO FINAL BLOQUEADO */}
+              <Grid item xs={4}>
                 <TextField
-                  label="PRECIO FINAL (Calculado)"
-                  type="number"
-                  fullWidth
-                  color="success"
+                  label="PRECIO VENTA"
                   focused
+                  color="success"
+                  fullWidth
                   value={Number(formData.sale_price).toFixed(2)}
-                  disabled // <--- AHORA ES SOLO LECTURA
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <AttachMoney />
-                      </InputAdornment>
-                    ),
-                  }}
-                  InputLabelProps={{ shrink: true }}
-                  sx={{
-                    bgcolor: "#e8f5e9",
-                    "& .MuiInputBase-input": {
-                      fontWeight: "bold",
-                      color: "green",
-                    },
-                  }}
-                  helperText={
-                    isUsd ? (
-                      <Typography
-                        variant="caption"
-                        color="success.main"
-                        fontWeight="bold"
-                      >
-                        Venta en Pesos: ${" "}
-                        {priceInArs.toLocaleString("es-AR", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </Typography>
-                    ) : (
-                      "Incluye Redondeo a $10"
-                    )
-                  }
+                  InputProps={{ readOnly: true }}
                 />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  select
+                  fullWidth
+                  label="Proveedor"
+                  value={formData.provider_id}
+                  onChange={(e) =>
+                    setFormData({ ...formData, provider_id: e.target.value })
+                  }
+                >
+                  {providers.map((p: any) => (
+                    <MenuItem key={p.id} value={p.id}>
+                      {p.name}
+                    </MenuItem>
+                  ))}
+                </TextField>
               </Grid>
             </Grid>
           </DialogContent>
-          <DialogActions sx={{ p: 2 }}>
-            <Button onClick={() => setOpen(false)} color="inherit">
-              Cancelar
-            </Button>
-            <Button variant="contained" type="submit" size="large">
-              Guardar Producto
+          <DialogActions>
+            <Button onClick={() => setOpen(false)}>Cancelar</Button>
+            <Button type="submit" variant="contained">
+              Guardar
             </Button>
           </DialogActions>
         </form>

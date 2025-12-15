@@ -1,115 +1,153 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Brackets } from 'typeorm';
+import { Repository, ILike } from 'typeorm';
 import { Product } from '../entities/product.entity';
 import { CreateProductDto } from '../dto/create-product.dto';
+import { UpdateProductDto } from '../dto/update-product.dto';
 
 @Injectable()
 export class ProductsService {
     constructor(
-        @InjectRepository(Product) private repo: Repository<Product>,
+        @InjectRepository(Product) private productRepo: Repository<Product>,
     ) { }
 
-    // 1. LISTAR CON BÚSQUEDA Y PAGINACIÓN
+    async create(createProductDto: CreateProductDto, tenantId: string) {
+        const product = this.productRepo.create({
+            ...createProductDto,
+            category: { id: createProductDto.category_id },
+            unit: { id: createProductDto.unit_id },
+            provider: createProductDto.provider_id ? { id: createProductDto.provider_id } : undefined,
+            tenant: { id: tenantId }
+        });
+
+        try {
+            return await this.productRepo.save(product);
+        } catch (error) {
+            this.handleDbErrors(error); // <--- Usamos una función auxiliar
+        }
+    }
+
     async findAll(
+        page: number,
+        limit: number,
         tenantId: string,
-        page: number = 1,
-        limit: number = 10,
-        search: string = '',
-        categoryId?: string,
-        providerId?: string,
+        search: string,
+        categoryId: string,
+        providerId: string,
         withDeleted: boolean = false
     ) {
         const skip = (page - 1) * limit;
 
-        const query = this.repo.createQueryBuilder('product')
+        const query = this.productRepo.createQueryBuilder('product')
             .leftJoinAndSelect('product.category', 'category')
             .leftJoinAndSelect('product.unit', 'unit')
             .leftJoinAndSelect('product.provider', 'provider')
+            // 👇 TRUCO: Traemos también los stocks para sumarlos en JS (es más seguro que hacerlo en SQL directo por ahora)
+            .leftJoinAndSelect('product.stocks', 'stocks')
             .where('product.tenant_id = :tenantId', { tenantId });
 
-        // 1. FILTROS
-        if (categoryId) query.andWhere('product.category_id = :categoryId', { categoryId });
-        if (providerId) query.andWhere('product.provider_id = :providerId', { providerId });
-
-        // 2. CORRECCIÓN PAPELERA: Si withDeleted es true, mostramos TODO (no filtramos nada)
-        // Si es false, mostramos solo los NO eliminados.
-        if (withDeleted) {
-            query.withDeleted(); // Esto trae activos + eliminados
-        } else {
-            query.andWhere('product.deleted_at IS NULL');
-        }
-
-        // 3. BUSCADOR (Asegúrate que estas columnas existan en la DB)
         if (search) {
-            query.andWhere(
-                new Brackets((qb) => { // Usamos Brackets para aislar el OR
-                    qb.where('product.name ILIKE :search', { search: `%${search}%` })
-                        .orWhere('product.sku ILIKE :search', { search: `%${search}%` })
-                        // Si barcode no existe en DB, esta línea rompe todo. 
-                        // Asegúrate de reiniciar el backend para que TypeORM cree la columna.
-                        .orWhere('product.barcode ILIKE :search', { search: `%${search}%` });
-                })
-            );
+            query.andWhere('(product.name ILike :search OR product.sku ILike :search)', { search: `%${search}%` });
         }
 
-        query.orderBy('product.created_at', 'DESC').skip(skip).take(limit);
-
-        const [data, total] = await query.getManyAndCount();
-        return { data, total };
-    }
-
-    // 2. CREAR
-    async create(dto: CreateProductDto, tenantId: string) {
-        // Validar SKU duplicado dentro de la misma empresa
-        if (dto.sku) {
-            const exists = await this.repo.findOne({ where: { sku: dto.sku, tenant: { id: tenantId } } });
-            if (exists) throw new BadRequestException(`El SKU ${dto.sku} ya existe.`);
+        if (categoryId) {
+            query.andWhere('category.id = :categoryId', { categoryId });
         }
 
-        const product = this.repo.create({
-            ...dto,
-            category: { id: dto.category_id },
-            unit: { id: dto.unit_id },
-            provider: dto.provider_id ? { id: dto.provider_id } : undefined,
-            tenant: { id: tenantId }
+        if (providerId) {
+            query.andWhere('provider.id = :providerId', { providerId });
+        }
+
+        if (withDeleted) {
+            query.withDeleted();
+        }
+
+        query.orderBy('product.created_at', 'DESC');
+
+        const [products, total] = await query
+            .take(limit)
+            .skip(skip)
+            .getManyAndCount();
+
+        // 👇 AQUÍ CALCULAMOS EL TOTAL
+        const enrichedProducts = products.map(p => {
+            // Sumamos la cantidad de todos los registros de stock de este producto
+            const totalStock = p.stocks?.reduce((sum, stock) => sum + Number(stock.quantity), 0) || 0;
+
+            // Limpiamos la lista de stocks para no enviar datos basura al front, solo mandamos el total
+            const { stocks, ...productData } = p;
+
+            return {
+                ...productData,
+                total_stock: totalStock // <--- Campo nuevo
+            };
         });
 
-        return this.repo.save(product);
+        return { data: enrichedProducts, total };
     }
 
-    // 3. ACTUALIZAR
-    async update(id: string, dto: any) {
-        // 1. SEPARAMOS: Sacamos los IDs "sueltos" del DTO para no ensuciar el update
-        const { category_id, unit_id, provider_id, ...rest } = dto;
+    async findOne(id: string) {
+        const product = await this.productRepo.findOne({
+            where: { id },
+            relations: ['category', 'unit', 'provider']
+        });
+        if (!product) throw new NotFoundException('Producto no encontrado');
+        return product;
+    }
 
-        // 2. PREPARAMOS: Creamos el objeto limpio con el resto de datos (nombre, precios, etc.)
-        const updateData: any = { ...rest };
+    async update(id: string, updateProductDto: UpdateProductDto) {
+        const product = await this.findOne(id);
 
-        // 3. CONVERTIMOS: Transformamos los IDs en Objetos Relación
-        if (category_id) updateData.category = { id: category_id };
-        if (unit_id) updateData.unit = { id: unit_id };
+        // Usamos 'any' temporalmente para manipular las relaciones sin pelear con TypeScript
+        const updatedData: any = { ...updateProductDto };
 
-        // Caso especial Proveedor: Si es undefined no lo tocamos. Si es null lo borramos. Si tiene ID lo actualizamos.
-        if (provider_id !== undefined) {
-            updateData.provider = provider_id ? { id: provider_id } : null;
+        if (updateProductDto.category_id) updatedData.category = { id: updateProductDto.category_id };
+        if (updateProductDto.unit_id) updatedData.unit = { id: updateProductDto.unit_id };
+
+        // Aquí sí podemos usar null explícito porque estamos manipulando el objeto directamente para .save()
+        if (updateProductDto.provider_id) {
+            updatedData.provider = { id: updateProductDto.provider_id };
+        } else if (updateProductDto.provider_id === null) {
+            updatedData.provider = null;
         }
 
-        // 4. GUARDAMOS
-        await this.repo.update(id, updateData);
+        // Limpiamos los IDs planos para no duplicar datos
+        delete updatedData.category_id;
+        delete updatedData.unit_id;
+        delete updatedData.provider_id;
 
-        return this.repo.findOne({ where: { id } });
+        try {
+            await this.productRepo.save({ ...product, ...updatedData });
+            return this.findOne(id);
+        } catch (error) {
+            this.handleDbErrors(error);
+        }
     }
 
-    // 4. BORRAR
     async remove(id: string, hard: boolean = false) {
         if (hard) {
-            return this.repo.delete(id); // Borrado Físico
+            return this.productRepo.delete(id);
         }
-        return this.repo.softDelete(id); // Borrado Lógico
+        return this.productRepo.softDelete(id);
     }
 
     async restore(id: string) {
-        return this.repo.restore(id);
+        return this.productRepo.restore(id);
+    }
+
+    private handleDbErrors(error: any) {
+        // El código '23505' es el error de "Unique Violation" en Postgres
+        if (error.code === '23505') {
+            // Verificamos qué campo duplicó para ser específicos
+            if (error.detail.includes('sku')) {
+                throw new ConflictException('Ya existe un producto con este SKU.');
+            }
+            if (error.detail.includes('barcode')) {
+                throw new ConflictException('Ya existe un producto con este Código de Barras.');
+            }
+            throw new ConflictException('El registro ya existe (Dato duplicado).');
+        }
+        // Si es otro error, que explote normalmente
+        throw error;
     }
 }

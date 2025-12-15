@@ -1,8 +1,9 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
 import { Category } from './category.entity';
 import { MeasurementUnit } from './measurement-unit.entity';
 import { Provider } from './provider.entity';
+import { Stock } from './stock.entity';
 
 @Entity('products')
 export class Product {
@@ -39,6 +40,9 @@ export class Product {
     @JoinColumn({ name: 'tenant_id' })
     tenant: Tenant;
 
+    @Column('text', { nullable: true })
+    image_url: string;
+
     // --- PRECIOS Y COSTOS ---
     @Column('text', { default: 'ARS' })
     currency: string; // <--- AQUÍ ESTABA EL CULPABLE
@@ -60,6 +64,10 @@ export class Product {
 
     @Column('decimal', { precision: 10, scale: 2, default: 0 })
     sale_price: number; // Precio Final
+
+
+    @OneToMany(() => Stock, (stock) => stock.product)
+    stocks: Stock[]
 
     // --- CONTROL ---
     @Column('int', { default: 0 })

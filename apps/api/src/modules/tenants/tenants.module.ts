@@ -13,6 +13,6 @@ import { TenantSettingsService } from './settings.service';
   imports: [TypeOrmModule.forFeature([Tenant, Branch, TenantConfig])], // Registramos la entidad aquí
   controllers: [BranchesController, TenantSettingsController],
   providers: [BranchesService, TenantSettingsService],
-  exports: [TypeOrmModule] // Para poder usarla en otros lados
+  exports: [ TypeOrmModule] // Para poder usarla en otros lados
 })
 export class TenantsModule {}

@@ -5,21 +5,26 @@ import { ValidationPipe } from '@nestjs/common';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-app.enableCors({
-    origin: [
-      'http://localhost:5173',       // Tu frontend en la PC
-      'http://192.168.1.50:5173',    // (Ejemplo) Tu celular en la red WiFi
-      // 'https://mi-erp-produccion.com' // <-- A futuro descomentamos esto
-    ],
+  // 1. Activamos CORS para que tu celular pueda pedir datos
+  app.enableCors({
+    origin: '*', // Permitir acceso desde cualquier IP (solo para desarrollo)
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });
-  // 2. Usar el puerto del sistema o el 3000 por defecto
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true, // Borra datos extra que no estén en el DTO
-    forbidNonWhitelisted: true, // Tira error si mandan datos basura
-  }));
 
-  await app.listen(process.env.PORT ?? 3000);
+  app.setGlobalPrefix('api');
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      //forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
+
+  // 2. IMPORTANTE: Agregamos '0.0.0.0' para escuchar en la red, no solo local
+  await app.listen(3000, '0.0.0.0'); 
+  
+  console.log(`🚀 Server corriendo en: ${await app.getUrl()}`);
 }
 bootstrap();

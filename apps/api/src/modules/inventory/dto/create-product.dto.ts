@@ -4,6 +4,10 @@ export class CreateProductDto {
     @IsNotEmpty() @IsString()
     name: string;
 
+    @IsOptional()
+    @IsString()
+    image_url?: string;
+
     @IsOptional() @IsString()
     description?: string;
 

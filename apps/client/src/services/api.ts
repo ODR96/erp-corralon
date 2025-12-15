@@ -1,14 +1,46 @@
 import axios from 'axios';
 
-// 1. Creamos una instancia de Axios configurada
-const api = axios.create({
-    baseURL: import.meta.env.VITE_API_URL, // Lee la variable del .env
-    headers: {
-        'Content-Type': 'application/json',
-    },
+// ------------------------------------------------------------------
+// 1. CONFIGURACIÓN DINÁMICA DE RED (Para que ande en Celular y PC)
+// ------------------------------------------------------------------
+const protocol = window.location.protocol;
+const hostname = window.location.hostname;
+const port = '3000';
+
+const API_URL = `${protocol}//${hostname}:${port}/api`;
+console.log('🔗 Conectando a API en:', API_URL);
+
+export const api = axios.create({
+    baseURL: API_URL,
+    headers: { 'Content-Type': 'application/json' },
 });
 
-// 2. Definimos los servicios de Autenticación
+// Interceptor para agregar el Token
+api.interceptors.request.use((config) => {
+    const token = localStorage.getItem('token');
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+    return config;
+});
+
+// Interceptor para manejar errores (Logout si es 401)
+api.interceptors.response.use(
+    (response) => response, // Devolvemos response completo para que el service decida si usa .data
+    (error) => {
+        if (error.response?.status === 401) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            if (!window.location.pathname.includes('/login')) {
+                window.location.href = '/login';
+            }
+        }
+        return Promise.reject(error);
+    }
+);
+
+// ------------------------------------------------------------------
+// 2. SERVICIOS
+// ------------------------------------------------------------------
+
 export const authService = {
     login: async (email: string, password: string) => {
         // Hace POST a /auth/login enviando email y password
@@ -120,6 +152,11 @@ export const inventoryService = {
         return response.data;
     },
 
+    getBranches: async () => {
+        const response = await api.get('/branches'); // Reutilizamos el endpoint general
+        return Array.isArray(response.data) ? response.data : (response.data.data || []);
+    },
+
     // Productos (CRUD Completo)
     getProducts: async (page = 1, limit = 10, search = '', categoryId = '', providerId = '', withDeleted = false) => {
         const token = localStorage.getItem('token');
@@ -140,13 +177,8 @@ export const inventoryService = {
         const response = await api.patch(`/inventory/products/${id}`, data, { headers: { Authorization: `Bearer ${token}` } });
         return response.data;
     },
-    deleteProduct: async (id: string, hard: boolean = false) => {
-        const token = localStorage.getItem('token');
-        // Axios permite pasar 'params' que se convierten en ?hard=true
-        await api.delete(`/inventory/products/${id}`, {
-            params: { hard }, // <--- ESTO FALTABA O ESTABA MAL
-            headers: { Authorization: `Bearer ${token}` }
-        });
+    deleteProduct: async (id: string, hardDelete = false) => {
+        await api.delete(`/inventory/products/${id}`, { params: { hardDelete } });
     },
 
     restoreProduct: async (id: string) => {
