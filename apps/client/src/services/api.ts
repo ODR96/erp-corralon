@@ -233,7 +233,12 @@ export const inventoryService = {
     restoreProduct: async (id: string) => {
         const token = localStorage.getItem('token');
         await api.patch(`/inventory/products/${id}/restore`, {}, { headers: { Authorization: `Bearer ${token}` } });
-    }
+    },
+
+    createPurchase: async (data: any) => {
+        const response = await api.post('/inventory/purchases', data);
+        return response.data;
+    },
 };
 
 export const salesService = {
@@ -279,6 +284,45 @@ export const settingsService = {
 export const integrationService = {
     getAfipData: async (cuit: string) => {
         const response = await api.get(`/integrations/afip/person/${cuit}`);
+        return response.data;
+    }
+};
+
+export const financeService = {
+    getChecks: async (page = 1, limit = 10, search = '', type = '', status = '', providerId = '', dateFrom = '', dateTo = '', hideFinalized = true) => {
+        const params: any = { page, limit, search, type, status, providerId, dateFrom, dateTo, hideFinalized };
+        if (type) params.type = type;
+        if (status) params.status = status;
+        if (providerId) params.providerId = providerId; // 👈 Enviamos
+
+        const response = await api.get('/finance/checks', { params });
+        return response.data;
+    },
+    createCheck: async (data: any) => {
+        const response = await api.post('/finance/checks', data);
+        return response.data;
+    },
+
+    updateCheck: async (id: string, data: any) => {
+        const response = await api.patch(`/finance/checks/${id}`, data);
+        return response.data;
+    },
+
+    deleteCheck: async (id: string) => {
+        await api.delete(`/finance/checks/${id}`);
+    },
+
+    getUpcomingPayments: async () => {
+        const response = await api.get('/finance/checks/dashboard/upcoming');
+        return response.data;
+    },
+
+    getCurrentAccount: async (entityId: string, type: 'client' | 'provider', page = 1) => {
+        const response = await api.get(`/finance/current-account/${type}/${entityId}`, { params: { page } });
+        return response.data;
+    },
+    addMovement: async (data: any) => {
+        const response = await api.post('/finance/current-account/movement', data);
         return response.data;
     }
 };

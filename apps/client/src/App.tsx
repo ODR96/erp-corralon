@@ -19,6 +19,9 @@ import { ProductsPage } from "./pages/ProductosPage";
 import { ProvidersPage } from "./pages/ProvidersPage";
 import { ProviderProfilePage } from "./pages/ProviderProfilePage";
 import { ClientsPage } from "./pages/ClientsPage";
+import { ChecksPage } from "./pages/CheckPage";
+import { AccountDetailsPage } from "./pages/AccountDetailsPage";
+import { NewPurchasePage } from "./pages/inventory/NewPurchasPage";
 
 // Si DashboardPage es muy simple, puedes dejarlo aquí o moverlo.
 const DashboardPlaceholder = () => <Typography variant="h4">Bienvenido al Dashboard</Typography>;
@@ -59,6 +62,9 @@ function App() {
               <Route path="/inventory/providers/:id" element={<ProviderProfilePage />} />
 
               <Route path="/sales/clients" element={< ClientsPage />} />
+              <Route path="/finance/checks" element={< ChecksPage />} />
+              <Route path="finance/account/:type/:id" element={< AccountDetailsPage /> } />
+              <Route path="/inventory/purchases/new" element={< NewPurchasePage />} />
 
             </Route>
           </Route>

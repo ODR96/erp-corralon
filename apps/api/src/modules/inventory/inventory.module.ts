@@ -19,13 +19,17 @@ import { StocksController } from './controllers/stock.controller';
 import { ProviderAccountsController } from './controllers/provider-account.controller';
 import { ProviderAccountsService } from './services/provider-accounts.service';
 import { ProviderAccount } from './entities/provider-account.entity';
+import { FinanceModule } from '../finance/finance.module';
+import { PurchasesController } from './controllers/purchases.controller';
+import { PurchasesService } from './services/purchases.service';
+import { Purchase, PurchaseItem } from './entities/purchase.entity';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([MeasurementUnit, Category, Product, Provider, Stock, StockMovement, ProviderAccount])
+        TypeOrmModule.forFeature([MeasurementUnit, Category, Product, Provider, Stock, StockMovement, ProviderAccount, Purchase, PurchaseItem]), FinanceModule
     ],
-    controllers: [CategoriesController, MeasurementUnitsController, ProvidersController, ProductsController, StocksController, ProviderAccountsController],
-    providers: [CategoriesService, MeasurementUnitsService, ProvidersService, ProductsService, StocksService, ProviderAccountsService],
+    controllers: [CategoriesController, MeasurementUnitsController, ProvidersController, ProductsController, StocksController, ProviderAccountsController, PurchasesController],
+    providers: [CategoriesService, MeasurementUnitsService, ProvidersService, ProductsService, StocksService, ProviderAccountsService, PurchasesService],
     exports: [TypeOrmModule] // Exportamos para que otros módulos (como Seed) puedan usar las entidades
 })
 export class InventoryModule { }

@@ -15,6 +15,7 @@ import { Permission } from './modules/auth/entities/permission.entity';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
+import { FinanceModule } from './modules/finance/finance.module';
 
 @Module({
   imports: [
@@ -47,7 +48,8 @@ import { IntegrationsModule } from './modules/integrations/integrations.module';
     AuthModule,
     InventoryModule,
     SalesModule,
-    IntegrationsModule
+    IntegrationsModule, 
+    FinanceModule
   ],
   controllers: [AppController],
   providers: [AppService, SeedService],

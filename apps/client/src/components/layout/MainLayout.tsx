@@ -25,7 +25,7 @@ import {
   Inventory as InventoryIcon,
   ShoppingCart as ShoppingCartIcon,
   ExitToApp as LogoutIcon,
-  AccountCircle, Store, Settings, PeopleAlt
+  AccountCircle, Store, Settings, PeopleAlt, AccountBalanceWallet
 } from "@mui/icons-material";
 
 const drawerWidth = 240;
@@ -57,6 +57,7 @@ export const MainLayout = () => {
     { text: "Usuarios", icon: <PeopleIcon />, path: "/users" },
     { text: 'Clientes', icon: <PeopleAlt />, path: '/sales/clients' },
     { text: 'Proveedores', icon: <PeopleAlt />, path: '/inventory/providers'},
+    { text: 'Cheques', icon: <AccountBalanceWallet />, path: '/finance/checks'},
     { text: "Inventario", icon: <InventoryIcon />, path: "/inventory" },
     { text: "Ventas", icon: <ShoppingCartIcon />, path: "/sales" },
     { text: 'Sucursales', icon: <Store />, path: '/branches' },

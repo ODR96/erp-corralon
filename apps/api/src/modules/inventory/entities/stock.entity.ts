@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, Unique, UpdateDateColumn } from 'typeorm';
 import { Product } from './product.entity';
 import { Branch } from '../../tenants/entities/branch.entity';
+import { Tenant } from 'src/modules/tenants/entities/tenant.entity';
 
 @Entity('stocks')
 @Unique(['product', 'branch']) // 🔒 Evita duplicados: Un producto solo aparece una vez por sucursal
@@ -18,6 +19,10 @@ export class Stock {
 
     @Column('decimal', { precision: 12, scale: 3, default: 0 })
     quantity: number; // Soporta 1.5 metros de arena
+
+    @ManyToOne(() => Tenant)
+    @JoinColumn({ name: 'tenant_id' })
+    tenant: Tenant;
 
     @UpdateDateColumn()
     last_updated: Date;

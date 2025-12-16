@@ -42,10 +42,11 @@ import {
   TrendingUp,
   TrendingDown,
   RestoreFromTrash,
-  DeleteForever,
+  DeleteForever, ShoppingCart
 } from "@mui/icons-material";
 import { useNotification } from '../context/NotificationContext';
 import { inventoryService, settingsService } from "../services/api";
+import { useNavigate } from "react-router-dom";
 
 // --- ESTILOS ---
 const DELETED_ROW_STYLE = {
@@ -74,6 +75,8 @@ const initialForm = {
 
 export const ProductsPage = () => {
   const { showNotification } = useNotification();
+  const navigate = useNavigate();
+
 
   // Estados
   const [products, setProducts] = useState<any[]>([]);
@@ -391,6 +394,14 @@ export const ProductsPage = () => {
         >
           Nuevo Producto
         </Button>
+        <Button 
+        variant="contained" 
+        color="secondary" // Color diferente para distinguir
+        startIcon={<ShoppingCart />}
+        onClick={() => navigate('/inventory/purchases/new')}
+    >
+        Ingresar Compra
+    </Button>
       </Stack>
 
       {/* FILTROS CARD */}

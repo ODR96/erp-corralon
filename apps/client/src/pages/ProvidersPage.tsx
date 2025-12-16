@@ -23,7 +23,7 @@ import {
   MenuItem,
   FormControlLabel,
   Switch,
-  InputAdornment
+  InputAdornment, Tooltip
 } from "@mui/material";
 import {
   Add,
@@ -36,7 +36,7 @@ import {
   RestoreFromTrash,
   DeleteForever,
   Visibility,
-  CloudSync
+  CloudSync,ReceiptLong
 } from "@mui/icons-material";
 import { inventoryService, integrationService } from "../services/api";
 import { useNavigate } from "react-router-dom";
@@ -381,6 +381,16 @@ export const ProvidersPage = () => {
                         >
                           <Edit />
                         </IconButton>
+                        <Tooltip title="Ver Cuenta Corriente / Pagar">
+        <IconButton 
+            color="secondary"
+            onClick={() => navigate(`/finance/account/provider/${provider.id}`, { 
+                state: { name: provider.name } // Pasamos el nombre para que se vea lindo el título
+            })}
+        >
+            <ReceiptLong />
+        </IconButton>
+    </Tooltip>
                         <IconButton
                           color="error"
                           onClick={() => handleDelete(p.id, false)}

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Box,
   Typography,
@@ -24,6 +25,7 @@ import {
   FormControlLabel,
   Switch,
   InputAdornment,
+  Tooltip
 } from "@mui/material";
 import {
   Add,
@@ -37,6 +39,7 @@ import {
   DeleteForever,
   AttachMoney,
   CloudSync,
+  ReceiptLong
 } from "@mui/icons-material";
 import { integrationService, salesService } from "../services/api";
 import { useNotification } from "../context/NotificationContext";
@@ -53,6 +56,7 @@ export const ClientsPage = () => {
   const [searchingAfip, setSearchingAfip] = useState(false);
   const [clients, setClients] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
   // Paginación y Filtros
   const [page, setPage] = useState(0);
@@ -363,6 +367,18 @@ export const ClientsPage = () => {
                       </>
                     ) : (
                       <>
+                        <Tooltip title="Ver Cuenta Corriente">
+                          <IconButton
+                            color="secondary"
+                            onClick={() =>
+                              navigate(`/finance/account/client/${c.id}`, {
+                                state: { name: c.name },
+                              })
+                            }
+                          >
+                            <ReceiptLong />
+                          </IconButton>
+                        </Tooltip>
                         <IconButton
                           color="primary"
                           onClick={() => openModal(c)}
