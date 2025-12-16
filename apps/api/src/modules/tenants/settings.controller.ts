@@ -1,7 +1,5 @@
 import { Controller, Get, Patch, Body, UseGuards, Request } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { RolesGuard } from '../auth/guards/roles.guard';     // <--- CORREGIDO (../)
-import { Roles } from '../auth/decorators/roles.decorator';
 import { TenantSettingsService } from './settings.service';
 import { UpdateConfigDto } from './dto/update-config.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';

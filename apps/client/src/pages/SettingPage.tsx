@@ -3,7 +3,7 @@ import {
   Box, Typography, Paper, Tabs, Tab, TextField, Button, Grid, InputAdornment, MenuItem 
 } from '@mui/material'; // <--- Agregado MenuItem
 import { Save } from '@mui/icons-material';
-import { useSnackbar } from 'notistack';
+import { useNotification } from '../context/NotificationContext';
 import { settingsService } from '../services/api';
 
 // 1. DEFINIMOS LOS TIPOS (Para que TypeScript no se queje)
@@ -20,7 +20,7 @@ interface SettingsData {
 }
 
 export const SettingsPage = () => {
-  const { enqueueSnackbar } = useSnackbar();
+  const { showNotification } = useNotification();
   const [tab, setTab] = useState(0);
   const [loading, setLoading] = useState(false);
 
@@ -58,7 +58,7 @@ export const SettingsPage = () => {
       });
     } catch (err) {
       console.error(err);
-      enqueueSnackbar('Error cargando configuración', { variant: 'error' });
+      showNotification('Error cargando configuración', { variant: 'error' });
     }
   };
 
@@ -80,9 +80,9 @@ export const SettingsPage = () => {
       };
 
       await settingsService.update(payload);
-      enqueueSnackbar('Configuración guardada correctamente', { variant: 'success' });
+      showNotification('Configuración guardada correctamente', { variant: 'success' });
     } catch (err: any) {
-      enqueueSnackbar('Error al guardar', { variant: 'error' });
+      showNotification('Error al guardar', { variant: 'error' });
     } finally {
       setLoading(false);
     }

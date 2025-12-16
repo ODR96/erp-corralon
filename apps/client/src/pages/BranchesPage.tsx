@@ -30,7 +30,7 @@ import {
   RestoreFromTrash,
   DeleteForever,
 } from "@mui/icons-material";
-import { useSnackbar } from "notistack";
+import { useNotification } from '../context/NotificationContext';
 import { branchesService } from "../services/api";
 
 const initialForm = {
@@ -43,7 +43,7 @@ const initialForm = {
 };
 
 export const BranchesPage = () => {
-  const { enqueueSnackbar } = useSnackbar();
+  const { showNotification } = useNotification();
 
   // ESTADOS DE DATOS
   const [branches, setBranches] = useState<any[]>([]);
@@ -78,7 +78,7 @@ export const BranchesPage = () => {
       setBranches(response.data);
       setTotal(response.total);
     } catch (err) {
-      enqueueSnackbar("Error cargando sucursales", { variant: "error" });
+      showNotification("Error cargando sucursales", { variant: "error" });
     }
   };
 
@@ -121,10 +121,10 @@ export const BranchesPage = () => {
     try {
       if (isEditing && editingId) {
         await branchesService.update(editingId, formData);
-        enqueueSnackbar("Sucursal actualizada", { variant: "success" });
+        showNotification("Sucursal actualizada", { variant: "success" });
       } else {
         await branchesService.create(formData);
-        enqueueSnackbar("Sucursal creada", { variant: "success" });
+        showNotification("Sucursal creada", { variant: "success" });
       }
       setOpen(false);
       loadData();
@@ -138,7 +138,7 @@ export const BranchesPage = () => {
         : backendMessage || "Error al guardar la sucursal";
 
       // 3. Mostramos la alerta roja con el texto real
-      enqueueSnackbar(errorText, { variant: "error" });
+      showNotification(errorText, { variant: "error" });
     }
   };
 
@@ -149,12 +149,12 @@ export const BranchesPage = () => {
     if (confirm(msg)) {
       try {
         await branchesService.delete(id, isAlreadyDeleted);
-        enqueueSnackbar(isAlreadyDeleted ? "Eliminado" : "En papelera", {
+        showNotification(isAlreadyDeleted ? "Eliminado" : "En papelera", {
           variant: "success",
         });
         loadData();
       } catch (err) {
-        enqueueSnackbar("Error al eliminar", { variant: "error" });
+        showNotification("Error al eliminar", { variant: "error" });
       }
     }
   };
@@ -162,10 +162,10 @@ export const BranchesPage = () => {
   const handleRestore = async (id: string) => {
     try {
       await branchesService.restore(id);
-      enqueueSnackbar("Restaurado", { variant: "success" });
+      showNotification("Restaurado", { variant: "success" });
       loadData();
     } catch (err) {
-      enqueueSnackbar("Error", { variant: "error" });
+      showNotification("Error", { variant: "error" });
     }
   };
 

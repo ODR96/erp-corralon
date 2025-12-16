@@ -1,26 +1,50 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
-import { Product } from './product.entity'; // (Aún no existe la relación inversa, no te preocupes)
+import { Product } from './product.entity';
+import { ProviderAccount } from './provider-account.entity';
+// import { Product } from './product.entity'; // Descomentar cuando quieras relacionar productos
+// import { Check } from '../../finance/entities/check.entity'; // FASE FUTURA: Cheques
 
 @Entity('providers')
 export class Provider {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 
-    @Column('text')
-    name: string; // Ej: "Corralón Mayorista SA"
+    @Column()
+    name: string;
 
-    @Column('text', { nullable: true })
+    @Column({ nullable: true })
     tax_id: string; // CUIT
 
-    @Column('text', { nullable: true })
-    contact_name: string; // "Juan el vendedor"
+    @Column({ nullable: true })
+    tax_condition: string; // RI, MT, etc.
 
-    @Column('text', { nullable: true })
-    email: string; // Para enviar órdenes de compra automáticas a futuro
+    @Column({ nullable: true })
+    email: string;
 
-    @Column('text', { nullable: true })
+    @Column({ nullable: true })
     phone: string;
+
+    @Column({ nullable: true })
+    address: string;
+
+    @Column({ type: 'text', nullable: true })
+    observation: string;
+
+    @Column({ default: true })
+    is_active: boolean;
+
+    @CreateDateColumn()
+    created_at: Date;
+
+    @UpdateDateColumn()
+    updated_at: Date;
+
+    @DeleteDateColumn()
+    deleted_at: Date;
+
+    @OneToMany(() => ProviderAccount, (account) => account.provider)
+    accounts: ProviderAccount[];
 
     @ManyToOne(() => Tenant)
     @JoinColumn({ name: 'tenant_id' })
@@ -28,11 +52,4 @@ export class Provider {
 
     @OneToMany(() => Product, (product) => product.provider)
     products: Product[];
-
-    @Column('boolean', { default: true })
-    is_active: boolean;
-
-    @CreateDateColumn() created_at: Date;
-    @UpdateDateColumn() updated_at: Date;
-    @DeleteDateColumn() deleted_at: Date;
 }

@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { Box, Button, Container, TextField, Typography, Card, CardContent, Avatar, Link } from '@mui/material';
 import { LockReset } from '@mui/icons-material';
-import { useSnackbar } from 'notistack';
+import { useNotification } from '../context/NotificationContext';
 
 export const ForgotPasswordPage = () => {
-  const { enqueueSnackbar } = useSnackbar();
+  const { showNotification } = useNotification();
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -17,7 +17,7 @@ export const ForgotPasswordPage = () => {
     // Aquí en Fase 4 conectaremos con authService.recoverPassword(email)
     setTimeout(() => {
       setIsLoading(false);
-      enqueueSnackbar('Si el email existe, recibirás instrucciones para recuperar tu clave.', { 
+      showNotification('Si el email existe, recibirás instrucciones para recuperar tu clave.', { 
         variant: 'success', 
         autoHideDuration: 6000 
       });

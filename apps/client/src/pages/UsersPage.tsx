@@ -37,8 +37,8 @@ import {
   RestoreFromTrash,
   DeleteForever, // <--- Iconos nuevos
 } from "@mui/icons-material";
-import { useSnackbar } from "notistack";
 import { usersService } from "../services/api";
+import { useNotification } from '../context/NotificationContext';
 
 interface UserData {
   id?: string;
@@ -58,7 +58,7 @@ const initialFormState: UserData = {
 };
 
 export const UsersPage = () => {
-  const { enqueueSnackbar } = useSnackbar();
+  const { showNotification } = useNotification();
   const [users, setUsers] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -99,7 +99,7 @@ const loadData = async () => {
       setBranches(branchesData);
     } catch (error) {
       console.error("Error cargando datos", error);
-      enqueueSnackbar("Error de conexión", { variant: "error" });
+      showNotification("Error de conexión", { variant: "error" });
     }
   };
 
@@ -180,10 +180,10 @@ const loadData = async () => {
         if (!updatePayload.password) delete updatePayload.password;
 
         await usersService.update(formData.id, updatePayload);
-        enqueueSnackbar("Usuario actualizado", { variant: "success" });
+        showNotification("Usuario actualizado", { variant: "success" });
       } else {
         await usersService.create(formData);
-        enqueueSnackbar("Usuario creado", { variant: "success" });
+        showNotification("Usuario creado", { variant: "success" });
       }
       handleClose();
       loadData();
@@ -206,13 +206,13 @@ const loadData = async () => {
       try {
         // Si ya estaba borrado, hacemos hard delete (true). Si no, soft delete (false).
         await usersService.delete(id, isAlreadyDeleted);
-        enqueueSnackbar(
+        showNotification(
           isAlreadyDeleted ? "Usuario destruido" : "Usuario enviado a papelera",
           { variant: "success" }
         );
         loadData();
       } catch (err) {
-        enqueueSnackbar("Error al eliminar", { variant: "error" });
+        showNotification("Error al eliminar", { variant: "error" });
       }
     }
   };
@@ -220,10 +220,10 @@ const loadData = async () => {
   const handleRestore = async (id: string) => {
     try {
       await usersService.restore(id);
-      enqueueSnackbar("Usuario restaurado", { variant: "success" });
+      showNotification("Usuario restaurado", { variant: "success" });
       loadData();
     } catch (err) {
-      enqueueSnackbar("Error al restaurar", { variant: "error" });
+      showNotification("Error al restaurar", { variant: "error" });
     }
   };
 

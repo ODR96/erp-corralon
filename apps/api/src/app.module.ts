@@ -13,6 +13,8 @@ import { AuthModule } from './modules/auth/auth.module';
 import { Role } from './modules/auth/entities/role.entity';       // <--- NUEVO
 import { Permission } from './modules/auth/entities/permission.entity';
 import { InventoryModule } from './modules/inventory/inventory.module';
+import { SalesModule } from './modules/sales/sales.module';
+import { IntegrationsModule } from './modules/integrations/integrations.module';
 
 @Module({
   imports: [
@@ -44,6 +46,8 @@ import { InventoryModule } from './modules/inventory/inventory.module';
     UsersModule,
     AuthModule,
     InventoryModule,
+    SalesModule,
+    IntegrationsModule
   ],
   controllers: [AppController],
   providers: [AppService, SeedService],

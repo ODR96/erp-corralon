@@ -146,15 +146,64 @@ export const inventoryService = {
         const response = await api.get('/inventory/units', { headers: { Authorization: `Bearer ${token}` } });
         return response.data;
     },
-    getProviders: async () => { // <--- NUEVO
-        const token = localStorage.getItem('token');
-        const response = await api.get('/inventory/providers', { headers: { Authorization: `Bearer ${token}` } });
+    getProviders: async (page = 1, limit = 10, search = '', withDeleted = false) => {
+        const response = await api.get('/inventory/providers', {
+            params: { page, limit, search, withDeleted }
+        });
+        // Validacion para que no rompa si el backend devuelve estructura distinta
         return response.data;
+    },
+    createProvider: async (data: any) => {
+        const response = await api.post('/inventory/providers', data);
+        return response.data;
+    },
+    updateProvider: async (id: string, data: any) => {
+        const response = await api.patch(`/inventory/providers/${id}`, data);
+        return response.data;
+    },
+    deleteProvider: async (id: string, hard = false) => {
+        await api.delete(`/inventory/providers/${id}`, { params: { hard } });
+    },
+
+    // 👇 NUEVO: Restore
+    restoreProvider: async (id: string) => {
+        await api.patch(`/inventory/providers/${id}/restore`);
     },
 
     getBranches: async () => {
         const response = await api.get('/branches'); // Reutilizamos el endpoint general
         return Array.isArray(response.data) ? response.data : (response.data.data || []);
+    },
+
+    getProviderById: async (id: string) => {
+        const response = await api.get(`/inventory/providers/${id}`);
+        return response.data;
+    },
+
+    // --- CUENTAS BANCARIAS (NUEVO) ---
+    getProviderAccounts: async (providerId: string, withDeleted = false) => {
+        const response = await api.get(`/inventory/provider-accounts/provider/${providerId}`, {
+            params: { withDeleted }
+        });
+        return response.data;
+    },
+
+    createProviderAccount: async (data: any) => {
+        const response = await api.post('/inventory/provider-accounts', data);
+        return response.data;
+    },
+
+    updateProviderAccount: async (id: string, data: any) => {
+        const response = await api.patch(`/inventory/provider-accounts/${id}`, data);
+        return response.data;
+    },
+
+    deleteProviderAccount: async (id: string, hard = false) => {
+        await api.delete(`/inventory/provider-accounts/${id}`, { params: { hard } });
+    },
+
+    restoreProviderAccount: async (id: string) => {
+        await api.patch(`/inventory/provider-accounts/${id}/restore`);
     },
 
     // Productos (CRUD Completo)
@@ -187,6 +236,33 @@ export const inventoryService = {
     }
 };
 
+export const salesService = {
+    getClients: async (page = 1, limit = 10, search = '', withDeleted = false) => {
+        const response = await api.get('/sales/clients', {
+            params: { page, limit, search, withDeleted }
+        });
+        return response.data;
+    },
+
+    createClient: async (data: any) => {
+        const response = await api.post('/sales/clients', data);
+        return response.data;
+    },
+
+    updateClient: async (id: string, data: any) => {
+        const response = await api.patch(`/sales/clients/${id}`, data);
+        return response.data;
+    },
+
+    deleteClient: async (id: string, hard = false) => {
+        await api.delete(`/sales/clients/${id}`, { params: { hard } });
+    },
+
+    restoreClient: async (id: string) => {
+        await api.patch(`/sales/clients/${id}/restore`);
+    },
+};
+
 export const settingsService = {
     get: async () => {
         const token = localStorage.getItem('token');
@@ -196,6 +272,13 @@ export const settingsService = {
     update: async (data: any) => {
         const token = localStorage.getItem('token');
         const response = await api.patch('/settings', data, { headers: { Authorization: `Bearer ${token}` } });
+        return response.data;
+    }
+};
+
+export const integrationService = {
+    getAfipData: async (cuit: string) => {
+        const response = await api.get(`/integrations/afip/person/${cuit}`);
         return response.data;
     }
 };

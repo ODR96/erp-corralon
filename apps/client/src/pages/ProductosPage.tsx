@@ -44,7 +44,7 @@ import {
   RestoreFromTrash,
   DeleteForever,
 } from "@mui/icons-material";
-import { useSnackbar } from "notistack";
+import { useNotification } from '../context/NotificationContext';
 import { inventoryService, settingsService } from "../services/api";
 
 // --- ESTILOS ---
@@ -73,7 +73,7 @@ const initialForm = {
 };
 
 export const ProductsPage = () => {
-  const { enqueueSnackbar } = useSnackbar();
+  const { showNotification } = useNotification();
 
   // Estados
   const [products, setProducts] = useState<any[]>([]);
@@ -142,8 +142,15 @@ export const ProductsPage = () => {
 
       setCategories(cats);
       setUnits(unitsData);
-      setProviders(provs);
       setBranches(branchesData);
+
+      if (Array.isArray(provs)) {
+        setProviders(provs);
+      } else if (provs && provs.data) {
+        setProviders(provs.data);
+      } else {
+        setProviders([]);
+      }
 
       const user = JSON.parse(localStorage.getItem("user") || "{}");
       const defaultBranchId =
@@ -167,7 +174,7 @@ export const ProductsPage = () => {
       setProducts(res.data);
       setTotal(res.total);
     } catch (err) {
-      enqueueSnackbar("Error cargando productos", { variant: "error" });
+      showNotification("Error cargando productos", { variant: "error" });
     }
   };
 
@@ -239,13 +246,13 @@ export const ProductsPage = () => {
         quantity: Number(stockForm.quantity),
         reason: stockForm.reason || "Ajuste manual",
       });
-      enqueueSnackbar("Stock actualizado correctamente", {
+      showNotification("Stock actualizado correctamente", {
         variant: "success",
       });
       setStockOpen(false);
       loadProducts();
     } catch (err: any) {
-      enqueueSnackbar(err.response?.data?.message || "Error", {
+      showNotification(err.response?.data?.message || "Error", {
         variant: "error",
       });
     }
@@ -312,15 +319,15 @@ export const ProductsPage = () => {
       };
       if (isEditing && editingId) {
         await inventoryService.updateProduct(editingId, payload);
-        enqueueSnackbar("Producto actualizado", { variant: "success" });
+        showNotification("Producto actualizado", { variant: "success" });
       } else {
         await inventoryService.createProduct(payload);
-        enqueueSnackbar("Producto creado", { variant: "success" });
+        showNotification("Producto creado", { variant: "success" });
       }
       setOpen(false);
       loadProducts();
     } catch (err: any) {
-      enqueueSnackbar("Error al guardar", { variant: "error" });
+      showNotification("Error al guardar", { variant: "error" });
     }
   };
 
@@ -345,12 +352,12 @@ export const ProductsPage = () => {
     ) {
       try {
         await inventoryService.deleteProduct(id, true); // true = hard delete
-        enqueueSnackbar("Producto eliminado definitivamente", {
+        showNotification("Producto eliminado definitivamente", {
           variant: "success",
         });
         loadProducts();
       } catch (err: any) {
-        enqueueSnackbar(
+        showNotification(
           "No se puede eliminar: Probablemente tenga stock o ventas asociadas.",
           { variant: "error" }
         );
