@@ -17,10 +17,7 @@ export const ForgotPasswordPage = () => {
     // Aquí en Fase 4 conectaremos con authService.recoverPassword(email)
     setTimeout(() => {
       setIsLoading(false);
-      showNotification('Si el email existe, recibirás instrucciones para recuperar tu clave.', { 
-        variant: 'success', 
-        autoHideDuration: 6000 
-      });
+      showNotification('Si el email existe, recibirás instrucciones para recuperar tu clave.', 'success');
     }, 1500);
   };
 

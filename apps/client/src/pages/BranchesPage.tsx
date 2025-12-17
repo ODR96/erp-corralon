@@ -78,7 +78,7 @@ export const BranchesPage = () => {
       setBranches(response.data);
       setTotal(response.total);
     } catch (err) {
-      showNotification("Error cargando sucursales", { variant: "error" });
+      showNotification("Error cargando sucursales","error" );
     }
   };
 
@@ -121,10 +121,10 @@ export const BranchesPage = () => {
     try {
       if (isEditing && editingId) {
         await branchesService.update(editingId, formData);
-        showNotification("Sucursal actualizada", { variant: "success" });
+        showNotification("Sucursal actualizada", "success" );
       } else {
         await branchesService.create(formData);
-        showNotification("Sucursal creada", { variant: "success" });
+        showNotification("Sucursal creada","success" );
       }
       setOpen(false);
       loadData();
@@ -138,7 +138,7 @@ export const BranchesPage = () => {
         : backendMessage || "Error al guardar la sucursal";
 
       // 3. Mostramos la alerta roja con el texto real
-      showNotification(errorText, { variant: "error" });
+      showNotification(errorText,   "error" );
     }
   };
 
@@ -149,12 +149,10 @@ export const BranchesPage = () => {
     if (confirm(msg)) {
       try {
         await branchesService.delete(id, isAlreadyDeleted);
-        showNotification(isAlreadyDeleted ? "Eliminado" : "En papelera", {
-          variant: "success",
-        });
+        showNotification(isAlreadyDeleted ? "Eliminado" : "En papelera", "success");
         loadData();
       } catch (err) {
-        showNotification("Error al eliminar", { variant: "error" });
+        showNotification("Error al eliminar",  "error" );
       }
     }
   };
@@ -162,10 +160,10 @@ export const BranchesPage = () => {
   const handleRestore = async (id: string) => {
     try {
       await branchesService.restore(id);
-      showNotification("Restaurado", { variant: "success" });
+      showNotification("Restaurado",  "success" );
       loadData();
     } catch (err) {
-      showNotification("Error", { variant: "error" });
+      showNotification("Error", "error" );
     }
   };
 

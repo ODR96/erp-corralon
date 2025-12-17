@@ -58,7 +58,7 @@ export const SettingsPage = () => {
       });
     } catch (err) {
       console.error(err);
-      showNotification('Error cargando configuración', { variant: 'error' });
+      showNotification('Error cargando configuración', 'error' );
     }
   };
 
@@ -80,9 +80,9 @@ export const SettingsPage = () => {
       };
 
       await settingsService.update(payload);
-      showNotification('Configuración guardada correctamente', { variant: 'success' });
+      showNotification('Configuración guardada correctamente', 'success');
     } catch (err: any) {
-      showNotification('Error al guardar', { variant: 'error' });
+      showNotification('Error al guardar', 'error' );
     } finally {
       setLoading(false);
     }

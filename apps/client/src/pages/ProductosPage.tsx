@@ -177,7 +177,7 @@ export const ProductsPage = () => {
       setProducts(res.data);
       setTotal(res.total);
     } catch (err) {
-      showNotification("Error cargando productos", { variant: "error" });
+      showNotification("Error cargando productos", "error" );
     }
   };
 
@@ -249,15 +249,11 @@ export const ProductsPage = () => {
         quantity: Number(stockForm.quantity),
         reason: stockForm.reason || "Ajuste manual",
       });
-      showNotification("Stock actualizado correctamente", {
-        variant: "success",
-      });
+      showNotification("Stock actualizado correctamente", "success");
       setStockOpen(false);
       loadProducts();
     } catch (err: any) {
-      showNotification(err.response?.data?.message || "Error", {
-        variant: "error",
-      });
+      showNotification(err.response?.data?.message, "error");
     }
   };
 
@@ -322,15 +318,15 @@ export const ProductsPage = () => {
       };
       if (isEditing && editingId) {
         await inventoryService.updateProduct(editingId, payload);
-        showNotification("Producto actualizado", { variant: "success" });
+        showNotification("Producto actualizado", "success" );
       } else {
         await inventoryService.createProduct(payload);
-        showNotification("Producto creado", { variant: "success" });
+        showNotification("Producto creado", "success");
       }
       setOpen(false);
       loadProducts();
     } catch (err: any) {
-      showNotification("Error al guardar", { variant: "error" });
+      showNotification("Error al guardar","error" );
     }
   };
 
@@ -355,14 +351,12 @@ export const ProductsPage = () => {
     ) {
       try {
         await inventoryService.deleteProduct(id, true); // true = hard delete
-        showNotification("Producto eliminado definitivamente", {
-          variant: "success",
-        });
+        showNotification("Producto eliminado definitivamente", "success");
         loadProducts();
       } catch (err: any) {
         showNotification(
           "No se puede eliminar: Probablemente tenga stock o ventas asociadas.",
-          { variant: "error" }
+          "error" 
         );
       }
     }

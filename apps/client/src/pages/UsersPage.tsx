@@ -99,7 +99,7 @@ const loadData = async () => {
       setBranches(branchesData);
     } catch (error) {
       console.error("Error cargando datos", error);
-      showNotification("Error de conexión", { variant: "error" });
+      showNotification("Error de conexión", "error" );
     }
   };
 
@@ -180,10 +180,10 @@ const loadData = async () => {
         if (!updatePayload.password) delete updatePayload.password;
 
         await usersService.update(formData.id, updatePayload);
-        showNotification("Usuario actualizado", { variant: "success" });
+        showNotification("Usuario actualizado", "success" );
       } else {
         await usersService.create(formData);
-        showNotification("Usuario creado", { variant: "success" });
+        showNotification("Usuario creado",  "success" );
       }
       handleClose();
       loadData();
@@ -208,11 +208,11 @@ const loadData = async () => {
         await usersService.delete(id, isAlreadyDeleted);
         showNotification(
           isAlreadyDeleted ? "Usuario destruido" : "Usuario enviado a papelera",
-          { variant: "success" }
+           "success" 
         );
         loadData();
       } catch (err) {
-        showNotification("Error al eliminar", { variant: "error" });
+        showNotification("Error al eliminar",  "error" );
       }
     }
   };
@@ -220,10 +220,10 @@ const loadData = async () => {
   const handleRestore = async (id: string) => {
     try {
       await usersService.restore(id);
-      showNotification("Usuario restaurado", { variant: "success" });
+      showNotification("Usuario restaurado", "success" );
       loadData();
     } catch (err) {
-      showNotification("Error al restaurar", { variant: "error" });
+      showNotification("Error al restaurar",  "error" );
     }
   };
 

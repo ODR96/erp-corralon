@@ -1,28 +1,40 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
-// 👇 1. Quitamos 'AlertColor' de aquí
 import { Snackbar, Alert } from '@mui/material';
-// 👇 2. Lo importamos separado usando "import type"
-import type { AlertColor } from '@mui/material'; 
+import type { AlertColor } from '@mui/material';
 
-interface NotificationContextProps {
-  showNotification: (message: string, severity?: AlertColor) => void;
+interface NotificationContextType {
+  showNotification: (message: string, severity?: string) => void;
 }
 
-const NotificationContext = createContext<NotificationContextProps | undefined>(undefined);
+const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
+
+// Lista de colores permitidos por Material UI
+const VALID_SEVERITIES = ['success', 'error', 'warning', 'info'];
 
 export const NotificationProvider = ({ children }: { children: ReactNode }) => {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState('');
   const [severity, setSeverity] = useState<AlertColor>('info');
 
-  const showNotification = (msg: string, type: AlertColor = 'success') => {
-    setMessage(msg);
-    setSeverity(type);
+  const showNotification = (msg: string, sev: string = 'info') => {
+    // 1. Guardamos el mensaje (si llega un objeto, lo forzamos a string)
+    setMessage(String(msg));
+
+    // 2. VALIDACIÓN ESTRICTA:
+    // Si 'sev' no es una de las palabras permitidas (ej: porque le pasaste un objeto error),
+    // forzamos a que sea 'info' o 'error' según el contexto.
+    if (VALID_SEVERITIES.includes(sev)) {
+        setSeverity(sev as AlertColor);
+    } else {
+        // Si mandaron basura, ponemos 'info' por defecto para que no crashee
+        console.warn('Se intentó usar una severidad inválida:', sev);
+        setSeverity('info');
+    }
+
     setOpen(true);
   };
 
-  const handleClose = (_?: React.SyntheticEvent | Event, reason?: string) => {
-    if (reason === 'clickaway') return;
+  const handleClose = () => {
     setOpen(false);
   };
 
@@ -31,11 +43,12 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
       {children}
       <Snackbar 
         open={open} 
-        autoHideDuration={4000} 
-        onClose={handleClose} 
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} // Abajo a la derecha
+        autoHideDuration={6000} 
+        onClose={handleClose}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
       >
-        <Alert onClose={handleClose} severity={severity} variant="filled" sx={{ width: '100%' }}>
+        {/* Aquí severity ya está limpio y seguro */}
+        <Alert onClose={handleClose} severity={severity} sx={{ width: '100%' }} variant="filled">
           {message}
         </Alert>
       </Snackbar>
@@ -45,6 +58,8 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
 
 export const useNotification = () => {
   const context = useContext(NotificationContext);
-  if (!context) throw new Error('useNotification must be used within a NotificationProvider');
+  if (!context) {
+    throw new Error('useNotification must be used within a NotificationProvider');
+  }
   return context;
 };
