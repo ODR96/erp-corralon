@@ -18,4 +18,8 @@ export class UpdateConfigDto {
     @IsOptional() @IsNumber() exchange_rate?: number;
 
     @IsOptional() @IsNumber() price_rounding?: number;
+
+    @IsOptional() @IsString() address?: string;
+    @IsOptional() @IsString() phone?: string;
+    @IsOptional() @IsString() email?: string;
 }

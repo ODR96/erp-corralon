@@ -1,311 +1,604 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import {
-  Box, Typography, Paper, Grid, TextField, Button, IconButton,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  MenuItem, Autocomplete, InputAdornment, Card, CardContent, Divider
-} from '@mui/material';
-import { Save, ArrowBack, Delete, AddShoppingCart, Search } from '@mui/icons-material';
-import { inventoryService } from '../../services/api'; 
-import { useNotification } from '../../context/NotificationContext';
+  Box,
+  Typography,
+  Paper,
+  Grid,
+  TextField,
+  Button,
+  IconButton,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Autocomplete,
+  Divider,
+  Stack,
+} from "@mui/material";
+import {
+  Save,
+  ArrowBack,
+  Delete,
+  AddShoppingCart,
+  Edit,
+} from "@mui/icons-material";
+import { inventoryService } from "../../services/api";
+import { useNotification } from "../../context/NotificationContext";
 
-// Mock de Sucursales (Idealmente vendría de un endpoint o del usuario logueado)
-// Si ya tienes un contexto de usuario con branch_id, úsalo aquí.
 export const NewPurchasePage = () => {
   const navigate = useNavigate();
   const { showNotification } = useNotification();
 
-  // Estados de Carga
+  // Referencia para volver al buscador
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // --- ESTADOS DE DATOS ---
   const [providers, setProviders] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
+  const [branches, setBranches] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Formulario Cabecera
+  // --- CABECERA ---
   const [header, setHeader] = useState({
     provider: null as any,
-    date: new Date().toISOString().split('T')[0],
-    invoice_number: '',
-    observation: '',
-    branch_id: ''
+    date: new Date().toISOString().split("T")[0],
+    invoice_number: "",
+    observation: "",
+    branch_id: "",
+    status: "RECEIVED",
   });
 
-  // Ítems de la Compra
+  // --- TABLA DE ÍTEMS ---
   const [items, setItems] = useState<any[]>([]);
-  
-  // Producto seleccionado temporalmente (para agregar a la lista)
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+
+  // --- ZONA DE EDICIÓN (CALCULADORA) ---
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
 
-  // Cargar datos iniciales
+  // Estado del formulario borrador
+  const [draftItem, setDraftItem] = useState({
+    quantity: 1,
+    list_price: 0,
+    discount_percent: 0,
+    cost_price: 0,
+    profit_margin: 30,
+    vat_rate: 21,
+    sale_price: 0,
+  });
+
+  // --- CARGA INICIAL ---
   useEffect(() => {
     loadData();
   }, []);
 
   const loadData = async () => {
     try {
-      const [provRes, prodRes] = await Promise.all([
-        inventoryService.getProviders(1, 100, ''),
-        inventoryService.getProducts(1, 1000, ''),
-        inventoryService.getBranches()
+      const [provRes, prodRes, branchRes] = await Promise.all([
+        inventoryService.getProviders(1, 100, ""),
+        inventoryService.getProducts(1, 1000, ""),
+        inventoryService.getBranches(),
       ]);
       setProviders(provRes.data || []);
       setProducts(prodRes.data || []);
-      if (branchRes && branchRes.length > 0) {
-          // Seleccionamos la primera sucursal que encontremos (normalmente la principal)
-          setHeader(prev => ({ ...prev, branch_id: branchRes[0].id }));
-      } else {
-          showNotification('Advertencia: No se encontraron sucursales activas', 'warning');
+
+      const branchesData = Array.isArray(branchRes)
+        ? branchRes
+        : branchRes?.data || [];
+      if (branchesData.length > 0) {
+        setBranches(branchesData);
+        setHeader((prev) => ({ ...prev, branch_id: branchesData[0].id }));
       }
     } catch (error) {
       console.error(error);
-      showNotification('Error cargando datos', 'error');
+      showNotification("Error cargando datos", "error");
     }
   };
 
-  // --- LÓGICA DE ÍTEMS ---
+  // --- LOGICA DE SELECCIÓN ---
+
+  const handleProductSelect = (product: any) => {
+    setSelectedProduct(product);
+
+    if (product) {
+      // Cargamos valores por defecto del producto maestro
+      setDraftItem({
+        quantity: 1,
+        list_price: Number(product.list_price) || 0,
+        discount_percent: Number(product.provider_discount) || 0,
+        cost_price: Number(product.cost_price) || 0,
+        profit_margin: Number(product.profit_margin) || 30,
+        vat_rate: Number(product.vat_rate) || 21,
+        sale_price: Number(product.sale_price) || 0,
+      });
+    }
+  };
+
+  // --- CALCULADORA ---
+  const handleDraftChange = (field: string, value: number) => {
+    setDraftItem((prev) => {
+      const newState = { ...prev, [field]: value };
+
+      // 1. Recalcular Costo si cambia Lista o Descuento
+      if (field === "list_price" || field === "discount_percent") {
+        const list = field === "list_price" ? value : prev.list_price;
+        const disc =
+          field === "discount_percent" ? value : prev.discount_percent;
+        newState.cost_price = list - list * (disc / 100);
+      }
+
+      // 2. Recalcular Precio Venta si cambia Costo, Margen o IVA
+      const currentCost = newState.cost_price;
+      const margin = newState.profit_margin;
+      const vat = newState.vat_rate;
+
+      const netPrice = currentCost * (1 + margin / 100);
+      const finalPrice = netPrice * (1 + vat / 100);
+
+      newState.sale_price = parseFloat(finalPrice.toFixed(2));
+
+      return newState;
+    });
+  };
+
+  // --- ABM ÍTEMS ---
 
   const handleAddItem = () => {
     if (!selectedProduct) return;
-
-    // Verificar si ya está en la lista
-    const exists = items.find(i => i.product_id === selectedProduct.id);
-    if (exists) {
-      showNotification('El producto ya está en la lista', 'warning');
+    if (draftItem.quantity <= 0) {
+      showNotification("Cantidad inválida", "warning");
       return;
     }
 
-    // Agregar nueva fila
-    const newItem = {
+    // Datos del ítem actual en el editor
+    const itemData = {
       product_id: selectedProduct.id,
       product_name: selectedProduct.name,
-      quantity: 1,
-      cost: Number(selectedProduct.cost_price) || 0,
-      subtotal: Number(selectedProduct.cost_price) || 0
+      quantity: draftItem.quantity,
+      list_price: draftItem.list_price,
+      discount_percent: draftItem.discount_percent,
+      cost: draftItem.cost_price,
+      profit_margin: draftItem.profit_margin,
+      vat_rate: draftItem.vat_rate,
+      sale_price: draftItem.sale_price,
+      subtotal: draftItem.quantity * draftItem.cost_price,
     };
 
-    setItems([...items, newItem]);
-    setSelectedProduct(null); // Limpiar buscador
-  };
+    if (editingIndex !== null) {
+      // --- MODO EDICIÓN: Reemplazamos exactamente la fila que estábamos tocando ---
+      const newItems = [...items];
+      newItems[editingIndex] = itemData; // Sobrescribimos
+      setItems(newItems);
+      showNotification(`Ítem actualizado`, "info");
+    } else {
+      // --- MODO NUEVO: Lógica de siempre (Merge o Push) ---
+      const existingIndex = items.findIndex(
+        (i) => i.product_id === selectedProduct.id
+      );
 
-  const handleUpdateItem = (index: number, field: string, value: number) => {
-    const newItems = [...items];
-    const item = newItems[index];
-    
-    // Actualizar campo
-    item[field] = value;
-    
-    // Recalcular subtotal
-    item.subtotal = item.quantity * item.cost;
-    
-    setItems(newItems);
+      if (existingIndex >= 0) {
+        // Si ya existe (y no estábamos editando ese específico), sumamos
+        const newItems = [...items];
+        const existing = newItems[existingIndex];
+        existing.quantity += itemData.quantity;
+        existing.subtotal = existing.quantity * existing.cost; // Actualizar subtotal
+        setItems(newItems);
+      } else {
+        // Agregamos al final
+        setItems([...items, itemData]);
+      }
+    }
+
+    // Limpieza final
+    setSelectedProduct(null);
+    setEditingIndex(null); // Importante: salir del modo edición
+
+    setTimeout(() => {
+      const input = document.getElementById("product-search-input");
+      if (input) input.focus();
+    }, 100);
   };
 
   const handleRemoveItem = (index: number) => {
     setItems(items.filter((_, i) => i !== index));
   };
 
-  // --- CÁLCULO TOTAL ---
-  const totalAmount = items.reduce((acc, item) => acc + item.subtotal, 0);
+  const handleEditItem = (index: number) => {
+    const itemToEdit = items[index];
+
+    // 1. Marcar que estamos editando ESTA fila (para ocultarla visualmente abajo)
+    setEditingIndex(index);
+
+    // 2. Cargar datos visuales y de calculadora
+    setSelectedProduct({
+      id: itemToEdit.product_id,
+      name: itemToEdit.product_name,
+      list_price: itemToEdit.list_price,
+    });
+
+    setDraftItem({
+      quantity: itemToEdit.quantity,
+      list_price: Number(itemToEdit.list_price) || 0,
+      discount_percent: Number(itemToEdit.discount_percent) || 0,
+      cost_price: Number(itemToEdit.cost) || 0,
+      profit_margin: Number(itemToEdit.profit_margin) || 30,
+      vat_rate: Number(itemToEdit.vat_rate) || 21,
+      sale_price: Number(itemToEdit.sale_price) || 0,
+    });
+
+    // ❌ BORRA LA LÍNEA handleRemoveItem(index); ¡Ya no la sacamos!
+  };
+
+  const handleCancelEdit = () => {
+    setSelectedProduct(null); // Cierra el editor
+    setEditingIndex(null); // Libera la fila (vuelve a aparecer en la tabla)
+  };
 
   // --- GUARDAR ---
-  const handleSubmit = async () => {
-    if (!header.provider) {
-        showNotification('Selecciona un proveedor', 'error');
-        return;
-    }
-    if (items.length === 0) {
-        showNotification('La lista de productos está vacía', 'error');
-        return;
-    }
+  const handleSubmit = async (isDraft: boolean) => {
+    if (!header.provider) return showNotification("Falta Proveedor", "error");
+    if (items.length === 0) return showNotification("Lista vacía", "error");
 
     setLoading(true);
     try {
-        const payload = {
-            provider_id: header.provider.id,
-            date: header.date,
-            invoice_number: header.invoice_number,
-            observation: header.observation,
-            branch_id: header.branch_id, // 👈 Importante para el stock
-            total: totalAmount,
-            items: items.map(i => ({
-                product_id: i.product_id,
-                quantity: i.quantity,
-                cost: i.cost
-            }))
-        };
+      const payload = {
+        ...header,
+        provider_id: header.provider.id,
+        status: isDraft ? "DRAFT" : "RECEIVED",
+        total: items.reduce((acc, i) => acc + i.subtotal, 0),
+        items: items.map((i) => ({
+          product_id: i.product_id,
+          quantity: i.quantity,
+          cost: i.cost,
+        })),
+      };
 
-        await inventoryService.createPurchase(payload);
-        showNotification('Compra registrada con éxito', 'success');
-        navigate(-1); // Volver atrás
+      await inventoryService.createPurchase(payload);
+      showNotification(
+        isDraft ? "Guardado en Borradores" : "Compra Confirmada",
+        "success"
+      );
+      navigate(-1);
     } catch (error) {
-        console.error(error);
-        showNotification('Error al guardar la compra', 'error');
+      console.error(error);
+      showNotification("Error al guardar", "error");
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
   };
 
+  const totalAmount = items.reduce((acc, item) => acc + item.subtotal, 0);
+
   return (
     <Box p={3}>
-      {/* HEADER TÍTULO */}
       <Box display="flex" alignItems="center" gap={2} mb={3}>
-        <IconButton onClick={() => navigate(-1)}><ArrowBack /></IconButton>
-        <Typography variant="h4" fontWeight="bold">Nueva Compra</Typography>
+        <IconButton onClick={() => navigate(-1)}>
+          <ArrowBack />
+        </IconButton>
+        <Typography variant="h4" fontWeight="bold">
+          Nueva Compra
+        </Typography>
       </Box>
 
       <Grid container spacing={3}>
-        {/* COLUMNA IZQUIERDA: DATOS FACTURA */}
-        <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 2 }}>
-                <Typography variant="h6" gutterBottom>Datos del Comprobante</Typography>
-                <Grid container spacing={2}>
-                    <Grid item xs={12}>
-                        <Autocomplete
-                            options={providers}
-                            getOptionLabel={(option) => option.name}
-                            value={header.provider}
-                            onChange={(_, newValue) => setHeader({...header, provider: newValue})}
-                            renderInput={(params) => <TextField {...params} label="Proveedor" fullWidth />}
-                        />
-                    </Grid>
-                    <Grid item xs={6}>
-                        <TextField 
-                            label="Fecha" 
-                            type="date" 
-                            fullWidth 
-                            InputLabelProps={{ shrink: true }}
-                            value={header.date}
-                            onChange={(e) => setHeader({...header, date: e.target.value})}
-                        />
-                    </Grid>
-                    <Grid item xs={6}>
-                        <TextField 
-                            label="Nro. Factura" 
-                            fullWidth 
-                            placeholder="0001-12345678"
-                            value={header.invoice_number}
-                            onChange={(e) => setHeader({...header, invoice_number: e.target.value})}
-                        />
-                    </Grid>
-                    <Grid item xs={12}>
-                        <TextField 
-                            label="Observaciones" 
-                            fullWidth multiline rows={2}
-                            value={header.observation}
-                            onChange={(e) => setHeader({...header, observation: e.target.value})}
-                        />
-                    </Grid>
-                    {/* INFO TOTAL */}
-                    <Grid item xs={12}>
-                        <Card variant="outlined" sx={{ bgcolor: '#f1f8e9', mt: 1 }}>
-                            <CardContent sx={{ textAlign: 'center', py: 2 }}>
-                                <Typography variant="body2" color="textSecondary">TOTAL A PAGAR</Typography>
-                                <Typography variant="h4" fontWeight="bold" color="success.main">
-                                    ${totalAmount.toLocaleString('es-AR')}
-                                </Typography>
-                            </CardContent>
-                        </Card>
-                    </Grid>
-                    <Grid item xs={12}>
-                        <Button 
-                            variant="contained" 
-                            size="large" 
-                            fullWidth 
-                            startIcon={<Save />}
-                            onClick={handleSubmit}
-                            disabled={loading}
-                        >
-                            {loading ? 'Guardando...' : 'Confirmar Compra'}
-                        </Button>
-                    </Grid>
-                </Grid>
-            </Paper>
+        {/* CABECERA */}
+        <Grid item xs={12}>
+          <Paper sx={{ p: 2 }}>
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={4}>
+                <Autocomplete
+                  options={providers}
+                  getOptionLabel={(o) => o.name}
+                  value={header.provider}
+                  onChange={(_, v) => setHeader({ ...header, provider: v })}
+                  renderInput={(params) => (
+                    <TextField {...params} label="Proveedor" />
+                  )}
+                />
+              </Grid>
+              <Grid item xs={6} md={2}>
+                <TextField
+                  label="Fecha"
+                  type="date"
+                  fullWidth
+                  InputLabelProps={{ shrink: true }}
+                  value={header.date}
+                  onChange={(e) =>
+                    setHeader({ ...header, date: e.target.value })
+                  }
+                />
+              </Grid>
+              <Grid item xs={6} md={3}>
+                <TextField
+                  label="Nro. Factura"
+                  fullWidth
+                  value={header.invoice_number}
+                  onChange={(e) =>
+                    setHeader({ ...header, invoice_number: e.target.value })
+                  }
+                />
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <TextField
+                  select
+                  fullWidth
+                  label="Sucursal"
+                  SelectProps={{ native: true }}
+                  value={header.branch_id}
+                  onChange={(e) =>
+                    setHeader({ ...header, branch_id: e.target.value })
+                  }
+                >
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </TextField>
+              </Grid>
+            </Grid>
+          </Paper>
         </Grid>
 
-        {/* COLUMNA DERECHA: ÍTEMS */}
-        <Grid item xs={12} md={8}>
-            <Paper sx={{ p: 2, minHeight: '500px' }}>
-                <Typography variant="h6" gutterBottom>Detalle de Productos</Typography>
-                
-                {/* BUSCADOR PARA AGREGAR */}
-                <Box display="flex" gap={2} mb={2} bgcolor="#f5f5f5" p={2} borderRadius={2}>
-                    <Autocomplete
-                        options={products}
-                        getOptionLabel={(option) => `${option.name} (Stock: ${option.stock || 0})`}
-                        fullWidth
-                        value={selectedProduct}
-                        onChange={(_, newValue) => setSelectedProduct(newValue)}
-                        renderInput={(params) => (
-                            <TextField {...params} label="Buscar Producto para agregar..." placeholder="Escribe nombre o código" />
-                        )}
-                    />
-                    <Button 
-                        variant="contained" 
-                        color="primary" 
-                        disabled={!selectedProduct}
-                        onClick={handleAddItem}
-                        startIcon={<AddShoppingCart />}
-                    >
-                        Agregar
-                    </Button>
-                </Box>
+        {/* ZONA DE CARGA */}
+        <Grid item xs={12}>
+          <Paper sx={{ p: 2, minHeight: "500px" }}>
+            {/* BUSCADOR */}
+            <Box mb={2}>
+              <Autocomplete
+                id="product-search-input"
+                options={products}
+                getOptionLabel={(o) => `${o.name} (${o.sku || "-"})`}
+                value={selectedProduct}
+                onChange={(_, v) => handleProductSelect(v)}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Buscar Producto"
+                    autoFocus
+                    placeholder="Código o Nombre..."
+                  />
+                )}
+              />
+            </Box>
 
-                {/* TABLA DE ÍTEMS */}
-                <TableContainer>
-                    <Table size="small">
-                        <TableHead>
-                            <TableRow>
-                                <TableCell>Producto</TableCell>
-                                <TableCell width={120}>Cantidad</TableCell>
-                                <TableCell width={150}>Costo Unit.</TableCell>
-                                <TableCell width={150} align="right">Subtotal</TableCell>
-                                <TableCell width={50}></TableCell>
-                            </TableRow>
-                        </TableHead>
-                        <TableBody>
-                            {items.map((item, index) => (
-                                <TableRow key={item.product_id}>
-                                    <TableCell>{item.product_name}</TableCell>
-                                    <TableCell>
-                                        <TextField 
-                                            type="number" 
-                                            size="small" 
-                                            value={item.quantity}
-                                            onChange={(e) => handleUpdateItem(index, 'quantity', Number(e.target.value))}
-                                        />
-                                    </TableCell>
-                                    <TableCell>
-                                        <TextField 
-                                            type="number" 
-                                            size="small" 
-                                            value={item.cost}
-                                            onChange={(e) => handleUpdateItem(index, 'cost', Number(e.target.value))}
-                                            InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
-                                        />
-                                    </TableCell>
-                                    <TableCell align="right">
-                                        <Typography fontWeight="bold">
-                                            ${item.subtotal.toLocaleString('es-AR')}
-                                        </Typography>
-                                    </TableCell>
-                                    <TableCell>
-                                        <IconButton color="error" size="small" onClick={() => handleRemoveItem(index)}>
-                                            <Delete fontSize="small" />
-                                        </IconButton>
-                                    </TableCell>
-                                </TableRow>
-                            ))}
-                            {items.length === 0 && (
-                                <TableRow>
-                                    <TableCell colSpan={5} align="center" sx={{ py: 5, color: 'text.secondary' }}>
-                                        <AddShoppingCart sx={{ fontSize: 40, mb: 1, display: 'block', mx: 'auto', opacity: 0.5 }} />
-                                        Agrega productos usando el buscador de arriba
-                                    </TableCell>
-                                </TableRow>
-                            )}
-                        </TableBody>
-                    </Table>
-                </TableContainer>
-            </Paper>
+            {/* CALCULADORA (Visible si hay producto seleccionado) */}
+            {selectedProduct && (
+              <Box
+                bgcolor="#e3f2fd"
+                p={2}
+                borderRadius={2}
+                mb={3}
+                border="1px solid #90caf9"
+              >
+                <Grid container spacing={2} alignItems="center">
+                  <Grid item xs={12}>
+                    <Typography
+                      variant="subtitle2"
+                      color="primary"
+                      fontWeight="bold"
+                    >
+                      {draftItem.list_price > 0
+                        ? "Editando Ítem"
+                        : "Nuevo Ítem"}
+                      : {selectedProduct.name}
+                    </Typography>
+                  </Grid>
+
+                  {/* Fila 1 */}
+                  <Grid item xs={2}>
+                    <TextField
+                      label="Cantidad"
+                      type="number"
+                      size="small"
+                      fullWidth
+                      autoFocus
+                      value={draftItem.quantity}
+                      onChange={(e) =>
+                        handleDraftChange("quantity", Number(e.target.value))
+                      }
+                      // 👇 Enter funciona aquí
+                      onKeyDown={(e) => e.key === "Enter" && handleAddItem()}
+                    />
+                  </Grid>
+                  <Grid item xs={2}>
+                    <TextField
+                      label="Precio Lista"
+                      type="number"
+                      size="small"
+                      fullWidth
+                      value={draftItem.list_price}
+                      onChange={(e) =>
+                        handleDraftChange("list_price", Number(e.target.value))
+                      }
+                      // 👇 Enter funciona aquí
+                      onKeyDown={(e) => e.key === "Enter" && handleAddItem()}
+                    />
+                  </Grid>
+                  <Grid item xs={2}>
+                    <TextField
+                      label="Desc. %"
+                      type="number"
+                      size="small"
+                      fullWidth
+                      value={draftItem.discount_percent}
+                      onChange={(e) =>
+                        handleDraftChange(
+                          "discount_percent",
+                          Number(e.target.value)
+                        )
+                      }
+                      // 👇 Enter funciona aquí
+                      onKeyDown={(e) => e.key === "Enter" && handleAddItem()}
+                    />
+                  </Grid>
+                  <Grid item xs={2}>
+                    <TextField
+                      label="Costo Neto"
+                      type="number"
+                      size="small"
+                      fullWidth
+                      // 👇 SOLO LECTURA (Read Only)
+                      InputProps={{ readOnly: true }}
+                      // Le dejamos el color warning para que se note que es importante
+                      color="warning"
+                      focused
+                      value={draftItem.cost_price.toFixed(2)}
+                    />
+                  </Grid>
+
+                  {/* Fila 2 */}
+                  <Grid item xs={2}>
+                    <TextField
+                      label="Margen %"
+                      type="number"
+                      size="small"
+                      fullWidth
+                      value={draftItem.profit_margin}
+                      onChange={(e) =>
+                        handleDraftChange(
+                          "profit_margin",
+                          Number(e.target.value)
+                        )
+                      }
+                      // 👇 Enter funciona aquí (último campo editable)
+                      onKeyDown={(e) => e.key === "Enter" && handleAddItem()}
+                    />
+                  </Grid>
+                  <Grid item xs={2}>
+                    <TextField
+                      label="Precio Venta"
+                      type="text"
+                      size="small"
+                      fullWidth
+                      // 👇 SOLO LECTURA (Read Only)
+                      InputProps={{ readOnly: true }}
+                      color="success"
+                      focused
+                      value={draftItem.sale_price.toFixed(2)}
+                    />
+                  </Grid>
+
+                  <Grid
+                    item
+                    xs={12}
+                    display="flex"
+                    justifyContent="flex-end"
+                    gap={1}
+                  >
+                    <Button
+                      variant="outlined"
+                      color="error"
+                      onClick={handleCancelEdit}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      variant="contained"
+                      onClick={handleAddItem}
+                      startIcon={<AddShoppingCart />}
+                    >
+                      AGREGAR
+                    </Button>
+                  </Grid>
+                </Grid>
+              </Box>
+            )}
+
+            {/* TABLA */}
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow sx={{ bgcolor: "#fafafa" }}>
+                    <TableCell>Producto</TableCell>
+                    <TableCell align="center">Cant.</TableCell>
+                    <TableCell align="right">Costo Unit.</TableCell>
+                    <TableCell align="right">Subtotal</TableCell>
+                    <TableCell align="right">Precio Venta</TableCell>
+                    <TableCell width={100} align="center">
+                      Acciones
+                    </TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {items.map((item, index) => {
+                    if (editingIndex === index) return null;
+                    return (
+                      <TableRow key={index}>
+                        <TableCell>{item.product_name}</TableCell>
+                        <TableCell align="center">{item.quantity}</TableCell>
+                        <TableCell align="right">
+                          ${item.cost.toFixed(2)}
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontWeight: "bold" }}>
+                          ${item.subtotal.toFixed(2)}
+                        </TableCell>
+                        <TableCell
+                          align="right"
+                          sx={{ color: "text.secondary" }}
+                        >
+                          ${item.sale_price?.toFixed(2)}
+                        </TableCell>
+                        <TableCell align="center">
+                          <Stack direction="row" justifyContent="center">
+                            <IconButton
+                              color="primary"
+                              size="small"
+                              onClick={() => handleEditItem(index)}
+                            >
+                              <Edit fontSize="small" />
+                            </IconButton>
+                            <IconButton
+                              color="error"
+                              size="small"
+                              onClick={() => handleRemoveItem(index)}
+                            >
+                              <Delete fontSize="small" />
+                            </IconButton>
+                          </Stack>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+
+            <Divider sx={{ my: 2 }} />
+
+            {/* FOOTER */}
+            <Box
+              display="flex"
+              justifyContent="space-between"
+              alignItems="center"
+            >
+              <Typography variant="h4" color="success.main" fontWeight="bold">
+                Total: ${totalAmount.toLocaleString("es-AR")}
+              </Typography>
+
+              <Stack direction="row" spacing={2}>
+                <Button
+                  variant="outlined"
+                  size="large"
+                  onClick={() => handleSubmit(true)}
+                  disabled={loading}
+                >
+                  Guardar Borrador
+                </Button>
+                <Button
+                  variant="contained"
+                  size="large"
+                  onClick={() => handleSubmit(false)}
+                  disabled={loading}
+                  startIcon={<Save />}
+                >
+                  Confirmar y Recibir
+                </Button>
+              </Stack>
+            </Box>
+          </Paper>
         </Grid>
       </Grid>
     </Box>

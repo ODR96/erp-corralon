@@ -1,22 +1,38 @@
-import { useEffect, useState } from 'react';
-import { 
-  Box, Typography, Paper, Tabs, Tab, TextField, Button, Grid, InputAdornment, MenuItem 
-} from '@mui/material'; // <--- Agregado MenuItem
-import { Save } from '@mui/icons-material';
-import { useNotification } from '../context/NotificationContext';
-import { settingsService } from '../services/api';
+import { useEffect, useState } from "react";
+import {
+  Box,
+  Typography,
+  Paper,
+  Tabs,
+  Tab,
+  TextField,
+  Button,
+  Grid,
+  InputAdornment,
+  MenuItem,
+  FormControlLabel,
+  Switch,
+} from "@mui/material";
+import { Save, Store, AttachMoney, Gavel } from "@mui/icons-material";
+import { useNotification } from "../context/NotificationContext";
+import { settingsService } from "../services/api";
 
-// 1. DEFINIMOS LOS TIPOS (Para que TypeScript no se queje)
+// 1. DEFINIMOS LOS TIPOS (Iguales a tu TenantConfig)
 interface SettingsData {
-  fantasy_name: string;
+  fantasy_name: string; // Backend usa fantasy_name
   legal_name: string;
-  tax_id: string;
+  tax_id: string; // Backend usa tax_id
+  address: string; // Nuevo
+  phone: string; // Nuevo
+  email: string; // Nuevo
+
   currency: string;
+  exchange_rate: number;
   default_vat_rate: number;
   default_profit_margin: number;
+
   allow_negative_stock: boolean;
-  exchange_rate: number;
-  price_rounding: number; // <--- NUEVO CAMPO
+  price_rounding: number;
 }
 
 export const SettingsPage = () => {
@@ -24,17 +40,20 @@ export const SettingsPage = () => {
   const [tab, setTab] = useState(0);
   const [loading, setLoading] = useState(false);
 
-  // 2. ESTADO INICIAL (Para evitar el error "value is undefined")
+  // 2. ESTADO INICIAL
   const [formData, setFormData] = useState<SettingsData>({
-    fantasy_name: '',
-    legal_name: '',
-    tax_id: '',
-    currency: 'ARS',
+    fantasy_name: "",
+    legal_name: "",
+    tax_id: "",
+    address: "",
+    phone: "",
+    email: "",
+    currency: "ARS",
+    exchange_rate: 1,
     default_vat_rate: 21,
     default_profit_margin: 30,
     allow_negative_stock: false,
-    exchange_rate: 1,      // Default seguro
-    price_rounding: 0      // Default seguro
+    price_rounding: 0,
   });
 
   useEffect(() => {
@@ -44,21 +63,26 @@ export const SettingsPage = () => {
   const loadSettings = async () => {
     try {
       const data = await settingsService.get();
-      // 3. CARGA SEGURA (Mapeamos lo que viene del backend)
-      setFormData({
-        fantasy_name: data.fantasy_name || '',
-        legal_name: data.legal_name || '',
-        tax_id: data.tax_id || '',
-        currency: data.currency || 'ARS',
-        default_vat_rate: Number(data.default_vat_rate || 21),
-        default_profit_margin: Number(data.default_profit_margin || 30),
-        allow_negative_stock: data.allow_negative_stock || false,
-        exchange_rate: Number(data.exchange_rate || 1),
-        price_rounding: Number(data.price_rounding || 0), // <--- LEER EL DATO
-      });
+      if (data) {
+        // Mapeamos directo porque ahora los nombres coinciden
+        setFormData({
+          fantasy_name: data.fantasy_name || "",
+          legal_name: data.legal_name || "",
+          tax_id: data.tax_id || "",
+          address: data.address || "", // Si no existe en DB vieja, viene vacio
+          phone: data.phone || "",
+          email: data.email || "",
+          currency: data.currency || "ARS",
+          exchange_rate: Number(data.exchange_rate || 1),
+          default_vat_rate: Number(data.default_vat_rate || 21),
+          default_profit_margin: Number(data.default_profit_margin || 30),
+          allow_negative_stock: data.allow_negative_stock || false,
+          price_rounding: Number(data.price_rounding || 0),
+        });
+      }
     } catch (err) {
       console.error(err);
-      showNotification('Error cargando configuración', 'error' );
+      showNotification("Error cargando configuración", "error");
     }
   };
 
@@ -66,62 +90,110 @@ export const SettingsPage = () => {
     if (e) e.preventDefault();
     setLoading(true);
     try {
-      // 4. GUARDADO COMPLETO
+      // ⚠️ CONVERSIÓN EXPLÍCITA DE DATOS ⚠️
+      // Aseguramos que los números viajen como números y no como texto
       const payload = {
-        fantasy_name: formData.fantasy_name,
-        legal_name: formData.legal_name,
-        tax_id: formData.tax_id,
-        currency: formData.currency,
+        ...formData,
+        exchange_rate: Number(formData.exchange_rate),
         default_vat_rate: Number(formData.default_vat_rate),
         default_profit_margin: Number(formData.default_profit_margin),
-        allow_negative_stock: formData.allow_negative_stock,
-        exchange_rate: Number(formData.exchange_rate),
-        price_rounding: Number(formData.price_rounding), // <--- ENVIAR EL DATO
+        price_rounding: Number(formData.price_rounding),
+        // Los booleanos y strings suelen viajar bien, pero por seguridad:
+        allow_negative_stock: Boolean(formData.allow_negative_stock),
       };
 
       await settingsService.update(payload);
-      showNotification('Configuración guardada correctamente', 'success');
+      showNotification("Configuración guardada correctamente", "success");
     } catch (err: any) {
-      showNotification('Error al guardar', 'error' );
+      console.error(err);
+      showNotification("Error al guardar", "error");
     } finally {
       setLoading(false);
     }
   };
 
   const handleChange = (field: keyof SettingsData, value: any) => {
-    setFormData({ ...formData, [field]: value });
+    setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
   return (
-    <Box>
-      <Typography variant="h4" mb={3}>Configuración del Negocio</Typography>
+    <Box p={3}>
+      <Typography variant="h4" mb={3} fontWeight="bold">
+        Configuración del Sistema
+      </Typography>
 
       <Paper sx={{ mb: 3 }}>
-        <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: 'divider' }}>
-          <Tab label="Datos Empresa" />
-          <Tab label="Finanzas" />
-          <Tab label="Reglas Inventario" />
+        <Tabs
+          value={tab}
+          onChange={(e, v) => setTab(v)}
+          sx={{ borderBottom: 1, borderColor: "divider" }}
+          variant="fullWidth"
+        >
+          <Tab icon={<Store />} iconPosition="start" label="Empresa" />
+          <Tab icon={<AttachMoney />} iconPosition="start" label="Finanzas" />
+          <Tab icon={<Gavel />} iconPosition="start" label="Reglas" />
         </Tabs>
 
         <form onSubmit={handleSave}>
-          <Box p={3}>
+          <Box p={4}>
             {/* TAB 0: DATOS EMPRESA */}
             {tab === 0 && (
               <Grid container spacing={3}>
+                <Grid item xs={12}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Estos datos aparecerán en los reportes y PDF de Compras.
+                  </Typography>
+                </Grid>
                 <Grid item xs={12} md={6}>
-                  <TextField fullWidth label="Nombre de Fantasía (Kiosco/Corralón)" 
-                    value={formData.fantasy_name} onChange={(e) => handleChange('fantasy_name', e.target.value)} 
-                    helperText="Ej: Corralón El Fuerte"
+                  <TextField
+                    fullWidth
+                    label="Nombre de Fantasía"
+                    placeholder="Ej: Ferretería El Clavo"
+                    value={formData.fantasy_name}
+                    onChange={(e) =>
+                      handleChange("fantasy_name", e.target.value)
+                    }
                   />
                 </Grid>
-                <Grid item xs={12} md={3}>
-                  <TextField fullWidth label="Razón Social" 
-                    value={formData.legal_name} onChange={(e) => handleChange('legal_name', e.target.value)} 
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    fullWidth
+                    label="Razón Social"
+                    value={formData.legal_name}
+                    onChange={(e) => handleChange("legal_name", e.target.value)}
                   />
                 </Grid>
-                <Grid item xs={12} md={3}>
-                  <TextField fullWidth label="CUIT / Identificación Fiscal" 
-                    value={formData.tax_id} onChange={(e) => handleChange('tax_id', e.target.value)} 
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    fullWidth
+                    label="CUIT / ID Fiscal"
+                    value={formData.tax_id}
+                    onChange={(e) => handleChange("tax_id", e.target.value)}
+                  />
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    fullWidth
+                    label="Teléfono"
+                    value={formData.phone}
+                    onChange={(e) => handleChange("phone", e.target.value)}
+                  />
+                </Grid>
+                <Grid item xs={12}>
+                  <TextField
+                    fullWidth
+                    label="Dirección Comercial"
+                    placeholder="Ej: Av. San Martín 1234, Formosa"
+                    value={formData.address}
+                    onChange={(e) => handleChange("address", e.target.value)}
+                  />
+                </Grid>
+                <Grid item xs={12}>
+                  <TextField
+                    fullWidth
+                    label="Email de Contacto"
+                    value={formData.email}
+                    onChange={(e) => handleChange("email", e.target.value)}
                   />
                 </Grid>
               </Grid>
@@ -130,70 +202,120 @@ export const SettingsPage = () => {
             {/* TAB 1: FINANZAS */}
             {tab === 1 && (
               <Grid container spacing={3}>
-                <Grid item xs={12}><Typography variant="h6" gutterBottom>Valores por Defecto</Typography></Grid>
-                
-                <Grid item xs={12} md={4}>
-                  <TextField fullWidth label="Cotización Dólar (Para conversión)" type="number"
-                    value={formData.exchange_rate} 
-                    onChange={(e) => handleChange('exchange_rate', e.target.value)}
-                    InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
-                    helperText="Usado para mostrar precios en pesos de productos dolarizados."
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    select
+                    fullWidth
+                    label="Moneda Principal"
+                    value={formData.currency}
+                    onChange={(e) => handleChange("currency", e.target.value)}
+                  >
+                    <MenuItem value="ARS">Peso Argentino (ARS)</MenuItem>
+                    <MenuItem value="USD">Dólar (USD)</MenuItem>
+                  </TextField>
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    fullWidth
+                    label="Cotización Dólar"
+                    type="number"
+                    value={formData.exchange_rate}
+                    onChange={(e) =>
+                      handleChange("exchange_rate", e.target.value)
+                    }
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">$</InputAdornment>
+                      ),
+                    }}
                   />
                 </Grid>
 
-                <Grid item xs={12} md={4}>
-                  <TextField select fullWidth label="Regla de Redondeo (ARS)" 
-                    value={formData.price_rounding} 
-                    onChange={(e) => handleChange('price_rounding', e.target.value)}
-                    helperText="Se aplica automáticamente al calcular precios en Pesos."
+                {/* 👇 SELECTOR DE IVA QUE PEDISTE */}
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    select
+                    fullWidth
+                    label="IVA por Defecto"
+                    value={formData.default_vat_rate}
+                    onChange={(e) =>
+                      handleChange("default_vat_rate", e.target.value)
+                    }
                   >
-                    <MenuItem value={0}>Exacto (Sin redondeo)</MenuItem>
-                    <MenuItem value={1}>Al entero más cercano ($1)</MenuItem>
-                    <MenuItem value={5}>Múltiplo de $5</MenuItem>
-                    <MenuItem value={10}>Múltiplo de $10</MenuItem>
-                    <MenuItem value={50}>Múltiplo de $50</MenuItem>
-                    <MenuItem value={100}>Múltiplo de $100</MenuItem>
-                  </TextField>
-                </Grid>
-                
-                <Grid item xs={12} md={4}>
-                  <TextField select fullWidth label="Moneda Principal" 
-                    value={formData.currency} onChange={(e) => handleChange('currency', e.target.value)}
-                  >
-                    <MenuItem value="ARS">Pesos Argentinos (ARS)</MenuItem>
-                    <MenuItem value="USD">Dólares (USD)</MenuItem>
+                    <MenuItem value={0}>0% (Exento)</MenuItem>
+                    <MenuItem value={10.5}>10.5%</MenuItem>
+                    <MenuItem value={21}>21% (General)</MenuItem>
+                    <MenuItem value={27}>27%</MenuItem>
                   </TextField>
                 </Grid>
 
                 <Grid item xs={12} md={6}>
-                  <TextField select fullWidth label="IVA por Defecto" 
-                    value={formData.default_vat_rate} onChange={(e) => handleChange('default_vat_rate', e.target.value)}
-                  >
-                     <MenuItem value={0}>0%</MenuItem>
-                     <MenuItem value={10.5}>10.5%</MenuItem>
-                     <MenuItem value={21}>21% (General)</MenuItem>
-                     <MenuItem value={27}>27%</MenuItem>
-                  </TextField>
-                </Grid>
-                <Grid item xs={12} md={6}>
-                  <TextField fullWidth label="Margen Ganancia Sugerido" type="number"
-                    value={formData.default_profit_margin} onChange={(e) => handleChange('default_profit_margin', e.target.value)} 
-                    InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }}
+                  <TextField
+                    fullWidth
+                    label="Margen Ganancia Sugerido (%)"
+                    type="number"
+                    value={formData.default_profit_margin}
+                    onChange={(e) =>
+                      handleChange("default_profit_margin", e.target.value)
+                    }
                   />
                 </Grid>
               </Grid>
             )}
 
-            {/* TAB 2: REGLAS INVENTARIO (Placeholder) */}
+            {/* TAB 2: REGLAS */}
             {tab === 2 && (
-              <Box>
-                <Typography>Próximamente: Configuración de stock negativo y alertas.</Typography>
-              </Box>
+              <Grid container spacing={3}>
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    select
+                    fullWidth
+                    label="Redondeo de Precios (Venta)"
+                    value={formData.price_rounding}
+                    onChange={(e) =>
+                      handleChange("price_rounding", e.target.value)
+                    }
+                  >
+                    <MenuItem value={0}>Exacto (Sin redondeo)</MenuItem>
+                    <MenuItem value={1}>Redondear a $1</MenuItem>
+                    <MenuItem value={5}>Redondear a $5</MenuItem>
+                    <MenuItem value={10}>Redondear a $10</MenuItem>
+                    <MenuItem value={50}>Redondear a $50</MenuItem>
+                    <MenuItem value={100}>Redondear a $100</MenuItem>
+                  </TextField>
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <Box display="flex" alignItems="center" height="100%">
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={formData.allow_negative_stock}
+                          onChange={(e) =>
+                            handleChange(
+                              "allow_negative_stock",
+                              e.target.checked
+                            )
+                          }
+                        />
+                      }
+                      label="Permitir Stock Negativo"
+                    />
+                  </Box>
+                </Grid>
+              </Grid>
             )}
 
-            <Box mt={3} display="flex" justifyContent="flex-end">
-              <Button variant="contained" startIcon={<Save />} type="submit" disabled={loading}>
-                {loading ? 'Guardando...' : 'Guardar Cambios'}
+            <Box mt={4} display="flex" justifyContent="flex-end">
+              <Button
+                variant="contained"
+                size="large"
+                startIcon={<Save />}
+                type="submit"
+                disabled={loading}
+              >
+                {loading ? "Guardando..." : "Guardar Configuración"}
               </Button>
             </Box>
           </Box>

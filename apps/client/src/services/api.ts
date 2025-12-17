@@ -239,6 +239,12 @@ export const inventoryService = {
         const response = await api.post('/inventory/purchases', data);
         return response.data;
     },
+
+    getPurchases: async (page = 1, limit = 10, filters: any = {}) => {
+        const params = { page, limit, ...filters };
+        const response = await api.get('/inventory/purchases', { params });
+        return response.data;
+    },
 };
 
 export const salesService = {
@@ -324,7 +330,33 @@ export const financeService = {
     addMovement: async (data: any) => {
         const response = await api.post('/finance/current-account/movement', data);
         return response.data;
+    },
+
+    getWalletChecks: async (search: string = '') => {
+        // Reutilizamos el endpoint de checks con filtros fijos
+        const response = await api.get('/finance/checks', {
+            params: {
+                status: 'PENDING',
+                type: 'THIRD_PARTY',
+                search,
+                limit: 100 // Traemos bastantes para el selector
+            }
+        });
+        return response.data; // Puede devolver { data: [], total: 0 } o array directo según tu controller
+    },
+
+    // Registrar el Pago Completo
+    createPayment: async (paymentData: any) => {
+        const response = await api.post('/finance/payments', paymentData);
+        return response.data;
+    },
+
+    // Consultar deuda actual (si tienes el endpoint, sino lo dejamos para después)
+    getProviderBalance: async (providerId: string) => {
+        const response = await api.get(`/finance/current-account/provider/${providerId}`);
+        return response.data.balance; // { balance: 150000, history: [...] }
     }
+
 };
 
 export default api;

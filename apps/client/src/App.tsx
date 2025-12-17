@@ -11,7 +11,7 @@ import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 
 // import { DashboardPage } from "./pages/DashboardPage"; // (Idealmente muévelo a su propio archivo, pero si no, deja el const aquí)
 import { UsersPage } from "./pages/UsersPage";
-import { ProfilePage } from './pages/ProfilePage';
+import { ProfilePage } from "./pages/ProfilePage";
 import { BranchesPage } from "./pages/BranchesPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { SettingsPage } from "./pages/SettingPage";
@@ -22,9 +22,13 @@ import { ClientsPage } from "./pages/ClientsPage";
 import { ChecksPage } from "./pages/CheckPage";
 import { AccountDetailsPage } from "./pages/AccountDetailsPage";
 import { NewPurchasePage } from "./pages/inventory/NewPurchasPage";
+import { PurchasesPage } from "./pages/inventory/PurchasesPage";
+import { NewPaymentPage } from "./pages/finance/NewPaymentPage";
 
 // Si DashboardPage es muy simple, puedes dejarlo aquí o moverlo.
-const DashboardPlaceholder = () => <Typography variant="h4">Bienvenido al Dashboard</Typography>;
+const DashboardPlaceholder = () => (
+  <Typography variant="h4">Bienvenido al Dashboard</Typography>
+);
 
 function App() {
   return (
@@ -32,7 +36,7 @@ function App() {
       {/* 👇 2. AQUÍ ENVOLVEMOS CON NUESTRO SISTEMA DE NOTIFICACIONES */}
       <NotificationProvider>
         <CssBaseline />
-        
+
         <Routes>
           {/* RUTA PÚBLICA */}
           <Route path="/login" element={<LoginPage />} />
@@ -41,38 +45,46 @@ function App() {
           {/* 🔐 ZONA PRIVADA (PROTEGIDA) */}
           <Route element={<ProtectedRoute />}>
             <Route element={<MainLayout />}>
-              
               {/* DASHBOARD */}
               <Route path="/" element={<DashboardPlaceholder />} />
-              
               {/* USUARIOS & PERFIL */}
               <Route path="/users" element={<UsersPage />} />
               <Route path="/profile" element={<ProfilePage />} />
-              
               {/* CONFIGURACIÓN & SUCURSALES */}
               <Route path="/branches" element={<BranchesPage />} />
               <Route path="/settings" element={<SettingsPage />} />
-
               {/* 📦 INVENTARIO */}
-              <Route path="/inventory" element={<ProductsPage />} /> {/* Ojo: quizás quieras cambiar la URL a /inventory/products para ser consistente */}
-              <Route path="/inventory/products" element={<ProductsPage />} /> {/* Agregué esta por consistencia */}
-              
+              <Route path="/inventory" element={<ProductsPage />} />{" "}
+              {/* Ojo: quizás quieras cambiar la URL a /inventory/products para ser consistente */}
+              <Route path="/inventory/products" element={<ProductsPage />} />{" "}
+              {/* Agregué esta por consistencia */}
               {/* 👥 PROVEEDORES */}
               <Route path="/inventory/providers" element={<ProvidersPage />} />
-              <Route path="/inventory/providers/:id" element={<ProviderProfilePage />} />
-
-              <Route path="/sales/clients" element={< ClientsPage />} />
-              <Route path="/finance/checks" element={< ChecksPage />} />
-              <Route path="finance/account/:type/:id" element={< AccountDetailsPage /> } />
-              <Route path="/inventory/purchases/new" element={< NewPurchasePage />} />
-
+              <Route
+                path="/inventory/providers/:id"
+                element={<ProviderProfilePage />}
+              />
+              <Route path="/sales/clients" element={<ClientsPage />} />
+              <Route path="/finance/checks" element={<ChecksPage />} />
+              <Route
+                path="finance/account/:type/:id"
+                element={<AccountDetailsPage />}
+              />
+              <Route
+                path="/inventory/purchases/new"
+                element={<NewPurchasePage />}
+              />
+              <Route path="/inventory/purchases" element={<PurchasesPage />} />
+              <Route
+                path="/finance/payments/new"
+                element={<NewPaymentPage />}
+              />
             </Route>
           </Route>
 
           {/* 404 - REDIRECCIÓN */}
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
-
       </NotificationProvider>
     </BrowserRouter>
   );

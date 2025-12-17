@@ -4,6 +4,13 @@ import { Provider } from './provider.entity';
 import { Product } from './product.entity';
 import { Branch } from 'src/modules/tenants/entities/branch.entity';
 
+export enum PurchaseStatus {
+    DRAFT = 'DRAFT',       // Borrador (Estoy armando el pedido)
+    ORDERED = 'ORDERED',   // Pedido (Ya se lo mandé al proveedor, esperando mercadería)
+    RECEIVED = 'RECEIVED', // Recibido (Llegó, impacta stock y cuenta corriente)
+    CANCELLED = 'CANCELLED' // Cancelado
+}
+
 
 @Entity('purchases')
 export class Purchase {
@@ -29,6 +36,13 @@ export class Purchase {
 
     @OneToMany(() => PurchaseItem, (item) => item.purchase, { cascade: true })
     items: PurchaseItem[];
+
+    @Column({
+        type: 'enum',
+        enum: PurchaseStatus,
+        default: PurchaseStatus.RECEIVED // Por defecto recibido para mantener compatibilidad con lo viejo
+    })
+    status: PurchaseStatus;
 
     @ManyToOne(() => Tenant)
     @JoinColumn({ name: 'tenant_id' })

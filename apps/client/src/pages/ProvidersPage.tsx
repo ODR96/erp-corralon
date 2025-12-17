@@ -23,7 +23,8 @@ import {
   MenuItem,
   FormControlLabel,
   Switch,
-  InputAdornment, Tooltip
+  InputAdornment,
+  Tooltip,
 } from "@mui/material";
 import {
   Add,
@@ -36,12 +37,12 @@ import {
   RestoreFromTrash,
   DeleteForever,
   Visibility,
-  CloudSync,ReceiptLong
+  CloudSync,
+  ReceiptLong,
 } from "@mui/icons-material";
 import { inventoryService, integrationService } from "../services/api";
 import { useNavigate } from "react-router-dom";
 import { useNotification } from "../context/NotificationContext";
-
 
 // Opciones para el selector de Condición fiscal
 const TAX_CONDITIONS = [
@@ -117,28 +118,28 @@ export const ProvidersPage = () => {
 
   const handleAfipSearch = async () => {
     if (!formData.tax_id || formData.tax_id.length < 11) {
-        showNotification('Ingresa un CUIT válido de 11 dígitos', 'warning');
-        return;
+      showNotification("Ingresa un CUIT válido de 11 dígitos", "warning");
+      return;
     }
 
     setSearchingAfip(true);
     try {
-        const data = await integrationService.getAfipData(formData.tax_id);
-        
-        // Autocompletamos el formulario
-        setFormData(prev => ({
-            ...prev,
-            name: data.name,
-            address: data.address,
-            tax_condition: data.tax_condition, // Asegúrate que coincida con tus values del Select (RI, MT, etc)
-        }));
-        showNotification('Datos obtenidos de AFIP', 'success');
+      const data = await integrationService.getAfipData(formData.tax_id);
+
+      // Autocompletamos el formulario
+      setFormData((prev) => ({
+        ...prev,
+        name: data.name,
+        address: data.address,
+        tax_condition: data.tax_condition, // Asegúrate que coincida con tus values del Select (RI, MT, etc)
+      }));
+      showNotification("Datos obtenidos de AFIP", "success");
     } catch (error) {
-        showNotification('No se encontraron datos o falló la conexión', 'error');
+      showNotification("No se encontraron datos o falló la conexión", "error");
     } finally {
-        setSearchingAfip(false);
+      setSearchingAfip(false);
     }
-};
+  };
 
   const handleSave = async () => {
     try {
@@ -382,15 +383,17 @@ export const ProvidersPage = () => {
                           <Edit />
                         </IconButton>
                         <Tooltip title="Ver Cuenta Corriente / Pagar">
-        <IconButton 
-            color="secondary"
-            onClick={() => navigate(`/finance/account/provider/${provider.id}`, { 
-                state: { name: provider.name } // Pasamos el nombre para que se vea lindo el título
-            })}
-        >
-            <ReceiptLong />
-        </IconButton>
-    </Tooltip>
+                          <IconButton
+                            color="secondary"
+                            onClick={() =>
+                              navigate(`/finance/account/provider/${p.id}`, {
+                                state: { name: p.name }, // Pasamos el nombre para que se vea lindo el título
+                              })
+                            }
+                          >
+                            <ReceiptLong />
+                          </IconButton>
+                        </Tooltip>
                         <IconButton
                           color="error"
                           onClick={() => handleDelete(p.id, false)}

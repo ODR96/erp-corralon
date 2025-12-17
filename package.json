@@ -12,6 +12,8 @@
   "license": "ISC",
   "packageManager": "pnpm@10.26.0",
   "dependencies": {
-    "@nestjs/mapped-types": "^2.1.0"
+    "@nestjs/mapped-types": "^2.1.0",
+    "jspdf": "^3.0.4",
+    "jspdf-autotable": "^5.0.2"
   }
 }

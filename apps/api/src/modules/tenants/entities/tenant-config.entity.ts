@@ -41,6 +41,15 @@ export class TenantConfig {
     @Column('text', { nullable: true })
     fantasy_name: string; // Nombre del Kiosco/Corralón
 
+    @Column('text', { nullable: true })
+    address: string;
+
+    @Column('text', { nullable: true })
+    phone: string;
+
+    @Column('text', { nullable: true })
+    email: string;
+
     @UpdateDateColumn()
     updated_at: Date;
 }
