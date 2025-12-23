@@ -99,7 +99,9 @@ export const generatePurchasePDF = (purchase: any, settings: any) => {
     const tableColumn = ["CÓDIGO", "DESCRIPCIÓN / PRODUCTO", "CANTIDAD"];
     const tableRows: any[] = [];
 
-    purchase.items?.forEach((item: any) => {
+    const itemsToPrint = purchase.details || purchase.items || [];
+
+    itemsToPrint.forEach((item: any) => {
         // Intentamos buscar el código: SKU, Barcode o ID
         const code = item.product?.sku || item.product?.barcode || '-';
         // Nombre del producto

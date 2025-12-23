@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   Box,
   Paper,
@@ -39,6 +39,8 @@ import {
 } from "@mui/icons-material";
 import { inventoryService, financeService } from "../../services/api";
 import { useNotification } from "../../context/NotificationContext";
+import { generatePaymentPDF } from "../../utils/paymentPdfGenerator";
+import { settingsService } from "../../services/api";
 
 // Helper para moneda
 const formatCurrency = (amount: number) =>
@@ -49,6 +51,8 @@ const formatCurrency = (amount: number) =>
 export const NewPaymentPage = () => {
   const navigate = useNavigate();
   const { showNotification } = useNotification();
+  const location = useLocation();
+  const [transferRef, setTransferRef] = useState("");
 
   // --- ESTADOS PRINCIPALES ---
   const [loading, setLoading] = useState(false);
@@ -82,6 +86,9 @@ export const NewPaymentPage = () => {
   // --- CARGA INICIAL ---
   useEffect(() => {
     loadProviders();
+    if (location.state && location.state.providerId) {
+      setSelectedProvider(location.state.providerId);
+    }
   }, []);
 
   // Al cambiar proveedor, buscamos su saldo
@@ -211,6 +218,7 @@ export const NewPaymentPage = () => {
         observation,
         cash_amount: totalCash,
         transfer_amount: totalTransfer,
+        transfer_reference: transferRef,
         third_party_check_ids: selectedThirdPartyChecks.map((c) => c.id),
         own_checks: ownChecks.map((c) => ({
           ...c,
@@ -220,8 +228,25 @@ export const NewPaymentPage = () => {
       };
 
       await financeService.createPayment(payload);
-      showNotification("Pago registrado con éxito", "success");
-      navigate("/inventory/purchases"); // O al historial de pagos cuando exista
+      const settings = await settingsService.get();
+      // Provider data lo tenemos en el array providers.find(...)
+      const providerData = providers.find((p) => p.id === selectedProvider);
+
+      // 3. Preparar datos para el PDF (Unimos lo que tenemos en el state)
+      const pdfData = {
+        date: paymentDate,
+        cash_amount: totalCash,
+        transfer_amount: totalTransfer,
+        transfer_reference: transferRef,
+        third_party_checks: selectedThirdPartyChecks,
+        own_checks: ownChecks,
+      };
+
+      // 4. GENERAR PDF
+      generatePaymentPDF(pdfData, providerData, settings);
+
+      showNotification("Pago registrado y PDF generado", "success");
+      navigate(-1);
     } catch (error) {
       console.error(error);
       showNotification("Error al registrar el pago", "error");
@@ -353,6 +378,13 @@ export const NewPaymentPage = () => {
                       <InputAdornment position="start">$</InputAdornment>
                     ),
                   }}
+                />
+                <TextField
+                  label="Nro. Comprobante / Ref"
+                  sx={{ width: "40%" }}
+                  value={transferRef}
+                  onChange={(e) => setTransferRef(e.target.value)}
+                  placeholder="Ej: 4500921"
                 />
               </Grid>
             </Grid>

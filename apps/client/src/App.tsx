@@ -24,6 +24,8 @@ import { AccountDetailsPage } from "./pages/AccountDetailsPage";
 import { NewPurchasePage } from "./pages/inventory/NewPurchasPage";
 import { PurchasesPage } from "./pages/inventory/PurchasesPage";
 import { NewPaymentPage } from "./pages/finance/NewPaymentPage";
+import { TenantsPage } from "./pages/admin/TenantsPage";
+import { POSPage } from "./pages/sales/POSPage";
 
 // Si DashboardPage es muy simple, puedes dejarlo aquí o moverlo.
 const DashboardPlaceholder = () => (
@@ -79,11 +81,17 @@ function App() {
                 path="/finance/payments/new"
                 element={<NewPaymentPage />}
               />
+              <Route
+                path="/inventory/purchases/:id"
+                element={<NewPurchasePage />}
+              />
             </Route>
           </Route>
 
           {/* 404 - REDIRECCIÓN */}
           <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route path="/admin/tenants" element={<TenantsPage />} />
+          <Route path="/sales/pos" element={<POSPage />} />
         </Routes>
       </NotificationProvider>
     </BrowserRouter>

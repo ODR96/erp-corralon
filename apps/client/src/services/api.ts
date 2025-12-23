@@ -49,6 +49,24 @@ export const authService = {
     },
 };
 
+export const tenantsService = {
+    // Listar todas las empresas (Super Admin)
+    getAll: async () => {
+        const response = await api.get('/tenants');
+        return response.data;
+    },
+
+    // Crear nueva empresa
+    create: async (data: any) => {
+        return await api.post('/tenants', data);
+    },
+
+    // Actualizar empresa (cambiar plan, activar/desactivar)
+    update: async (id: string, data: any) => {
+        return await api.patch(`/tenants/${id}`, data);
+    }
+};
+
 export const usersService = {
     // Ahora acepta el parámetro opcional
     getAll: async (withDeleted: boolean = false, page: number = 1, limit: number = 10, search: string = '') => {
@@ -206,6 +224,11 @@ export const inventoryService = {
         await api.patch(`/inventory/provider-accounts/${id}/restore`);
     },
 
+    getProduct: async (id: string) => {
+        const response = await api.get(`/inventory/products/${id}`);
+        return response.data;
+    },
+
     // Productos (CRUD Completo)
     getProducts: async (page = 1, limit = 10, search = '', categoryId = '', providerId = '', withDeleted = false) => {
         const token = localStorage.getItem('token');
@@ -216,6 +239,26 @@ export const inventoryService = {
         });
         return response.data;
     },
+
+    getStock: async (productId: string, branchId: string) => {
+        // Necesitamos un endpoint para esto, o usamos el getProduct y filtramos en el front.
+        // Opción rápida backend: un endpoint GET /products/:id/stock/:branchId
+        // PERO, como ya arreglamos el getProduct, podemos usar ese si quieres ahorrar endpoints.
+
+        // SI YA TIENES UN ENDPOINT CREADO PARA ESTO, ÚSALO.
+        // Si no, te sugiero usar este truco en el api.ts para no tocar mas backend:
+        const response = await api.get(`/inventory/products/${productId}`);
+        const stocks = response.data.stocks || [];
+        const branchStock = stocks.find((s: any) => s.branch?.id === branchId);
+        return { quantity: branchStock ? branchStock.quantity : 0 };
+    },
+
+    adjustStock: async (data: any) => {
+        // 👇 CORRECCIÓN: Usamos la ruta exacta de tu StocksController
+        const response = await api.post('/inventory/stocks/adjust', data);
+        return response.data;
+    },
+
     createProduct: async (data: any) => {
         const token = localStorage.getItem('token');
         const response = await api.post('/inventory/products', data, { headers: { Authorization: `Bearer ${token}` } });
@@ -245,6 +288,16 @@ export const inventoryService = {
         const response = await api.get('/inventory/purchases', { params });
         return response.data;
     },
+
+    getPurchaseById: async (id: string) => {
+        const response = await api.get(`/inventory/purchases/${id}`);
+        return response.data;
+    },
+
+    updatePurchase: async (id: string, data: any) => {
+        const response = await api.patch(`/inventory/purchases/${id}`, data);
+        return response.data;
+    }
 };
 
 export const salesService = {
@@ -343,6 +396,11 @@ export const financeService = {
             }
         });
         return response.data; // Puede devolver { data: [], total: 0 } o array directo según tu controller
+    },
+
+    getUpcomingChecks: async () => {
+        const response = await api.get('/finance/checks/dashboard/upcoming');
+        return response.data;
     },
 
     // Registrar el Pago Completo

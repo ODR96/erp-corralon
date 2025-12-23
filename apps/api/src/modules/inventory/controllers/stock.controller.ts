@@ -23,8 +23,13 @@ export class StocksController {
 
     // Ajustar Stock (Entrada/Salida Manual)
     @Post('adjust')
-    @RequirePermissions('stock.adjust')
+    @RequirePermissions('products.manage')
     adjust(@Body() dto: StockAdjustmentDto, @Request() req: any) {
-        return this.service.adjustStock(dto, req.user.userId);
+        // 👇 Pasamos Tenant (seguridad) y User (auditoría)
+        return this.service.adjustStock(
+            dto,
+            req.user.tenantId,
+            req.user.id // O req.user.userId según tu estrategia
+        );
     }
 }

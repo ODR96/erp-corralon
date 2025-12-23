@@ -3,6 +3,8 @@ import { Tenant } from '../../tenants/entities/tenant.entity';
 import { Client } from '../../sales/entities/client.entity';
 import { Provider } from '../../inventory/entities/provider.entity';
 import { Check } from './check.entity'; // Importamos la entidad que creamos recién
+import { PaymentOrder } from './payment-order.entity';
+
 
 export enum MovementType {
     DEBIT = 'DEBIT',   // Aumenta la deuda (Ej: Le vendí fiado / Le compré a proveedor)
@@ -70,6 +72,10 @@ export class CurrentAccountMovement {
     @ManyToOne(() => Tenant)
     @JoinColumn({ name: 'tenant_id' })
     tenant: Tenant;
+
+    @ManyToOne(() => PaymentOrder, (order) => order.movements, { nullable: true })
+    @JoinColumn({ name: 'payment_order_id' })
+    paymentOrder: PaymentOrder;
 
     @CreateDateColumn()
     created_at: Date;

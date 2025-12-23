@@ -8,9 +8,10 @@ import { CurrentAccountController } from './controllers/current-account.controll
 import { CurrentAccountService } from './services/current-account.service';
 import { PaymentsService } from './services/payments.service';
 import { PaymentsController } from './controllers/payments.controller';
+import { PaymentOrder } from './entities/payment-order.entity';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([Check, CurrentAccountMovement])],
+    imports: [TypeOrmModule.forFeature([Check, CurrentAccountMovement, PaymentOrder])],
     controllers: [ChecksController, CurrentAccountController, PaymentsController],
     providers: [ChecksService, CurrentAccountService, PaymentsService],
     exports: [ChecksService, CurrentAccountService]

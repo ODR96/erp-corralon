@@ -15,7 +15,7 @@ export class UsersController {
     @RequirePermissions('users.create')
     create(@Body() createUserDto: CreateUserDto, @Request() req: any) {
         // FIX ERROR 1: Pasamos el rol del que pide (req.user.role)
-        return this.usersService.create(createUserDto, req.user.tenant, req.user.role);
+        return this.usersService.create(createUserDto, req.user.tenantId, req.user);
     }
 
     @Get()
@@ -35,7 +35,7 @@ export class UsersController {
     @Get('roles')
     @RequirePermissions('users.view', 'users.create')
     getRoles(@Request() req: any) {
-        return this.usersService.getRoles(req.user.tenant.id);
+        return this.usersService.getRoles(req.user.tenant.id, req.user);
     }
 
     // 👇 Endpoint para el dropdown de sucursales (Sin cambios, pero asegúrate que exista en el servicio)

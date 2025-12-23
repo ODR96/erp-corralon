@@ -22,11 +22,13 @@ import { ProviderAccount } from './entities/provider-account.entity';
 import { FinanceModule } from '../finance/finance.module';
 import { PurchasesController } from './controllers/purchases.controller';
 import { PurchasesService } from './services/purchases.service';
-import { Purchase, PurchaseItem } from './entities/purchase.entity';
+import { Purchase } from './entities/purchase.entity';
+import { PurchaseDetail } from './entities/purchase-detail.entity';
+import { TenantConfig } from '../tenants/entities/tenant-config.entity';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([MeasurementUnit, Category, Product, Provider, Stock, StockMovement, ProviderAccount, Purchase, PurchaseItem]), FinanceModule
+        TypeOrmModule.forFeature([MeasurementUnit, Category, Product, Provider, Stock, StockMovement, ProviderAccount, Purchase, PurchaseDetail, TenantConfig]), FinanceModule
     ],
     controllers: [CategoriesController, MeasurementUnitsController, ProvidersController, ProductsController, StocksController, ProviderAccountsController, PurchasesController],
     providers: [CategoriesService, MeasurementUnitsService, ProvidersService, ProductsService, StocksService, ProviderAccountsService, PurchasesService],

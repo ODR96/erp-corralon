@@ -1,89 +1,123 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { CreatePaymentDto } from '../dto/create-payment.dto';
 import { CurrentAccountService } from './current-account.service';
 import { ChecksService } from './checks.service';
+import { PaymentOrder } from '../entities/payment-order.entity';
+// 👇 Asegúrate de tener este import
+import { Check, CheckStatus, CheckType } from '../entities/check.entity';
 import { MovementType, MovementConcept } from '../entities/current-account.entity';
-import { CheckStatus, CheckType } from '../entities/check.entity';
 
 @Injectable()
 export class PaymentsService {
     constructor(
         private readonly accountService: CurrentAccountService,
-        private readonly checksService: ChecksService
-    ) {}
+        private readonly checksService: ChecksService,
+        @InjectRepository(PaymentOrder) private paymentOrderRepo: Repository<PaymentOrder>,
+    ) { }
 
     async registerPayment(dto: CreatePaymentDto, tenantId: string) {
-        const { provider_id, date, observation } = dto;
-        const totalMovements = [];
+        const { provider_id, date, observation, cash_amount, transfer_amount } = dto;
 
-        // 1. PAGO EN EFECTIVO 💵
-        if (dto.cash_amount && dto.cash_amount > 0) {
-            await this.accountService.addMovement({
-                amount: dto.cash_amount,
-                type: MovementType.CREDIT, // Baja deuda
-                concept: MovementConcept.PAYMENT,
-                description: `Pago Efectivo. ${observation || ''}`,
-                date: new Date(date),
-                provider: { id: provider_id } as any,
-            }, tenantId);
-        }
+        // 1. Calcular Total
+        const totalCash = cash_amount || 0;
+        const totalTransfer = transfer_amount || 0;
 
-        // 2. TRANSFERENCIA 🏦
-        if (dto.transfer_amount && dto.transfer_amount > 0) {
-            await this.accountService.addMovement({
-                amount: dto.transfer_amount,
-                type: MovementType.CREDIT,
-                concept: MovementConcept.PAYMENT,
-                description: `Transferencia Bancaria. ${observation || ''}`,
-                date: new Date(date),
-                provider: { id: provider_id } as any,
-            }, tenantId);
-        }
+        // Sumar cheques terceros
+        let totalChecks = 0;
 
-        // 3. CHEQUES DE TERCEROS (Cartera) 🤝
-        if (dto.third_party_check_ids && dto.third_party_check_ids.length > 0) {
-            for (const checkId of dto.third_party_check_ids) {
-                // Buscamos el cheque
-                const check = await this.checksService.findOne(checkId, tenantId);
-                
-                if (check.status !== CheckStatus.PENDING) {
-                    throw new BadRequestException(`El cheque ${check.number} no está en cartera (Estado: ${check.status})`);
+        // 🚨 CORRECCIÓN AQUÍ: Tipado explícito del array
+        const checksToUse: Check[] = [];
+
+        if (dto.third_party_check_ids?.length) {
+            for (const id of dto.third_party_check_ids) {
+                const c = await this.checksService.findOne(id, tenantId);
+
+                // Validamos que esté disponible (opcional pero recomendado)
+                if (c.status !== CheckStatus.PENDING) {
+                    throw new BadRequestException(`El cheque ${c.number} no está en cartera.`);
                 }
 
-                // Actualizamos cheque: Lo marcamos como USADO y asignamos al proveedor
-                await this.checksService.update(check.id, {
-                    status: CheckStatus.USED,
-                    provider_id: provider_id, 
-                    // payment_date: new Date(date) // Opcional: ¿Cambiamos la fecha de cobro o mantenemos la original? Mejor mantener original.
-                } as any, tenantId);
-
-                // Generamos el movimiento en la Cta Cte
-                await this.accountService.addMovement({
-                    amount: Number(check.amount),
-                    type: MovementType.CREDIT,
-                    concept: MovementConcept.CHECK,
-                    description: `Entrega Cheque Tercero #${check.number} (${check.bank_name})`,
-                    date: new Date(date),
-                    provider: { id: provider_id } as any,
-                    check: { id: check.id } as any
-                }, tenantId);
+                totalChecks += Number(c.amount);
+                checksToUse.push(c);
             }
         }
 
-        // 4. CHEQUES PROPIOS (Emisión) ✍️
-        if (dto.own_checks && dto.own_checks.length > 0) {
-            for (const checkDto of dto.own_checks) {
-                // Forzamos el tipo y el proveedor
-                checkDto.type = CheckType.OWN;
-                checkDto.provider_id = provider_id; 
-                checkDto.status = CheckStatus.PENDING; // Nace pendiente de cobro
+        // Sumar cheques propios
+        const ownChecksToCreate = dto.own_checks || [];
+        const totalOwn = ownChecksToCreate.reduce((acc, curr) => acc + Number(curr.amount), 0);
 
-                // Usamos el servicio de cheques que ya tiene la lógica de crear el movimiento
-                // (Revisamos tu checks.service.ts y SÍ tiene la lógica automática en 'create')
-                await this.checksService.create(checkDto, tenantId);
-            }
+        const grandTotal = totalCash + totalTransfer + totalChecks + totalOwn;
+
+        // 2. CREAR LA ORDEN DE PAGO (CABECERA)
+        const order = this.paymentOrderRepo.create({
+            date: new Date(date),
+            total_amount: grandTotal,
+            observation: observation,
+            provider: { id: provider_id },
+            tenant: { id: tenantId }
+        });
+        const savedOrder = await this.paymentOrderRepo.save(order);
+
+        // 3. GENERAR MOVIMIENTOS
+        const linkToOrder = (data: any) => ({ ...data, paymentOrder: savedOrder });
+
+        // Efectivo
+        if (totalCash > 0) {
+            await this.accountService.addMovement(linkToOrder({
+                amount: totalCash,
+                type: MovementType.CREDIT,
+                concept: MovementConcept.PAYMENT,
+                description: `Pago Efectivo (OP #${savedOrder.number})`,
+                date: new Date(date),
+                provider: { id: provider_id },
+            }), tenantId);
+        }
+        
+        // Transferencia
+        if (totalTransfer > 0) {
+            const ref = dto.transfer_reference ? `(Ref: ${dto.transfer_reference})` : '';
+            await this.accountService.addMovement(linkToOrder({
+                amount: totalTransfer,
+                type: MovementType.CREDIT,
+                concept: MovementConcept.PAYMENT,
+                description: `Transferencia ${ref} (OP #${savedOrder.number})`,
+                date: new Date(date),
+                provider: { id: provider_id },
+            }), tenantId);
         }
 
-        return { success: true, message: 'Pago registrado correctamente' };
+        // Cheques Terceros (Actualizar estado + Movimiento)
+        for (const check of checksToUse) {
+            await this.checksService.update(check.id, { status: CheckStatus.USED, provider_id } as any, tenantId);
+            await this.accountService.addMovement(linkToOrder({
+                amount: Number(check.amount),
+                type: MovementType.CREDIT,
+                concept: MovementConcept.CHECK,
+                description: `Cheque Tercero #${check.number} (OP #${savedOrder.number})`,
+                date: new Date(date),
+                provider: { id: provider_id },
+                check: check
+            }), tenantId);
+        }
+
+        // Cheques Propios
+        for (const checkDto of ownChecksToCreate) {
+            checkDto.type = CheckType.OWN;
+            checkDto.provider_id = provider_id;
+            checkDto.status = CheckStatus.PENDING;
+            await this.checksService.create(checkDto, tenantId);
+            // Nota: create() ya genera un movimiento, idealmente deberíamos vincularlo también a la OP aquí.
+        }
+
+        return {
+            success: true,
+            order: {
+                ...savedOrder,
+                // Corregido el acceso a la propiedad sin await innecesario
+                providerName: checksToUse.length > 0 ? checksToUse[0].provider?.name : 'Proveedor'
+            }
+        };
     }
 }

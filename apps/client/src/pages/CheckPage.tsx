@@ -1,5 +1,9 @@
 import { useState, useEffect } from "react";
-import { isBusinessDay, getNextBusinessDay, getFriendlyDate } from '../utils/dateUtils';
+import {
+  isBusinessDay,
+  getNextBusinessDay,
+  getFriendlyDate,
+} from "../utils/dateUtils";
 import {
   Box,
   Typography,
@@ -28,7 +32,8 @@ import {
   Menu,
   CircularProgress,
   Alert,
-  FormControlLabel, Switch // 👈 1. IMPORTANTE: Agregamos Alert aquí
+  FormControlLabel,
+  Switch, // 👈 1. IMPORTANTE: Agregamos Alert aquí
 } from "@mui/material";
 import {
   Add,
@@ -36,11 +41,15 @@ import {
   AccountBalance,
   Search,
   Warning,
-  FilterList, AutoFixHigh, EventBusy, SyncAlt, AutoMode
+  FilterList,
+  AutoFixHigh,
+  EventBusy,
+  SyncAlt,
+  AutoMode,
 } from "@mui/icons-material";
 import { financeService, inventoryService } from "../services/api";
 import { useNotification } from "../context/NotificationContext";
-import { BatchChecksDialog } from '../components/finance/BatchChecksDialog';
+import { BatchChecksDialog } from "../components/finance/BatchChecksDialog";
 
 const BANCOS_ARG = [
   "Banco Galicia",
@@ -62,19 +71,19 @@ const CHECK_STATUSES = [
   { value: "USED", label: "Entregado a Proveedor", color: "default" },
   { value: "LENT", label: "Prestado", color: "secondary" },
   { value: "REJECTED", label: "RECHAZADO", color: "error" },
-  { value: 'VOID', label: 'ANULADO (Error/Cancelado)', color: 'error' },
+  { value: "VOID", label: "ANULADO (Error/Cancelado)", color: "error" },
 ];
 
 export const ChecksPage = () => {
   const { showNotification } = useNotification();
-  
+
   // Datos
   const [checks, setChecks] = useState<any[]>([]);
   const [providers, setProviders] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  
+
   // Filtros
-  const [tabValue, setTabValue] = useState("THIRD_PARTY");
+  const [tabValue, setTabValue] = useState("OWN");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [search, setSearch] = useState("");
@@ -83,15 +92,15 @@ export const ChecksPage = () => {
   const [total, setTotal] = useState(0);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [hideFinalized, setHideFinalized] = useState(true)
-  
+  const [hideFinalized, setHideFinalized] = useState(true);
+
   // Modal Edición Completa
   const [open, setOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<any>({});
   const dateValidation = isBusinessDay(formData.payment_date);
   const [openGenerator, setOpenGenerator] = useState(false);
-  
+
   // Menú Rápido de Estado
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [selectedCheckId, setSelectedCheckId] = useState<string | null>(null);
@@ -109,7 +118,7 @@ export const ChecksPage = () => {
     filterStatus,
     dateFrom,
     dateTo,
-    hideFinalized
+    hideFinalized,
   ]);
 
   const loadChecks = async () => {
@@ -123,7 +132,8 @@ export const ChecksPage = () => {
         filterStatus,
         filterProvider,
         dateFrom,
-        dateTo, hideFinalized
+        dateTo,
+        hideFinalized
       );
       setChecks(data.data);
       setTotal(data.total);
@@ -276,7 +286,8 @@ export const ChecksPage = () => {
 
   const getRowColor = (check: any) => {
     if (check.status === "PAID") return "inherit";
-    if (check.status === "REJECTED" || check.status === "VOID") return "#ffebee";
+    if (check.status === "REJECTED" || check.status === "VOID")
+      return "#ffebee";
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -306,22 +317,28 @@ export const ChecksPage = () => {
   const findBetterDate = () => {
     // 1. Buscar siguiente día hábil (sin feriados ni findes)
     let nextDate = getNextBusinessDay(formData.payment_date);
-    
+
     // 2. (Opcional) Evitar fechas repetidas
     // Si la fecha sugerida ya tiene cheques, intentamos avanzar uno más
     // Esto es un loop simple, se puede hacer más complejo
     let safety = 0;
     while (
-        checks.some(c => c.payment_date.split('T')[0] === nextDate && c.type === formData.type) && 
-        safety < 5
+      checks.some(
+        (c) =>
+          c.payment_date.split("T")[0] === nextDate && c.type === formData.type
+      ) &&
+      safety < 5
     ) {
-        nextDate = getNextBusinessDay(nextDate);
-        safety++;
+      nextDate = getNextBusinessDay(nextDate);
+      safety++;
     }
 
     setFormData({ ...formData, payment_date: nextDate });
-    showNotification(`Fecha ajustada al ${getFriendlyDate(nextDate)}`, 'success');
-};
+    showNotification(
+      `Fecha ajustada al ${getFriendlyDate(nextDate)}`,
+      "success"
+    );
+  };
 
   // 👇 2. CÁLCULO DE ALERTA DE FECHA (Lógica Nueva)
   // Filtramos los cheques que coinciden en fecha con lo que estás escribiendo
@@ -395,11 +412,7 @@ export const ChecksPage = () => {
             <MenuItem value="">Todos</MenuItem>
             {CHECK_STATUSES.map((s) => (
               <MenuItem key={s.value} value={s.value}>
-                <Chip
-                  label={s.label}
-                  color={s.color as any}
-                  size="small"
-                />
+                <Chip label={s.label} color={s.color as any} size="small" />
               </MenuItem>
             ))}
           </TextField>
@@ -415,12 +428,15 @@ export const ChecksPage = () => {
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
           />
-
           <Tooltip title="Ver solo este día (Copiar fecha)">
-        <IconButton size="small" onClick={() => setDateTo(dateFrom)} disabled={!dateFrom}>
-            <SyncAlt fontSize="small" />
-        </IconButton>
-    </Tooltip>
+            <IconButton
+              size="small"
+              onClick={() => setDateTo(dateFrom)}
+              disabled={!dateFrom}
+            >
+              <SyncAlt fontSize="small" />
+            </IconButton>
+          </Tooltip>
           <TextField
             label="Hasta"
             type="date"
@@ -429,29 +445,27 @@ export const ChecksPage = () => {
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
           />
-
-          <Button 
-    variant="text" 
-    color="primary" 
-    size="small" 
-    startIcon={<AutoMode />} // Icono de rayito/automático
-    onClick={() => setOpenGenerator(true)}
->
-    Generar Tanda
-</Button>
-
+          <Button
+            variant="text"
+            color="primary"
+            size="small"
+            startIcon={<AutoMode />} // Icono de rayito/automático
+            onClick={() => setOpenGenerator(true)}
+          >
+            Generar Tanda
+          </Button>
           <Box flexGrow={1} /> {/* Espaciador */}
           <FormControlLabel
-        control={
-            <Switch 
+            control={
+              <Switch
                 checked={!hideFinalized} // Invertimos lógica visual: Check = Ver Historial
-                onChange={(e) => setHideFinalized(!e.target.checked)} 
+                onChange={(e) => setHideFinalized(!e.target.checked)}
                 color="primary"
-            />
-        }
-        label="Ver Historial (Pagados/Anulados)"
-        sx={{ mr: 2, color: 'text.secondary' }}
-    />
+              />
+            }
+            label="Ver Historial (Pagados/Anulados)"
+            sx={{ mr: 2, color: "text.secondary" }}
+          />
           <Button
             variant="outlined"
             color="error"
@@ -564,11 +578,17 @@ export const ChecksPage = () => {
                   </TableCell>
 
                   <TableCell>
-                    {tabValue === "THIRD_PARTY"
-                      ? c.drawer_name
-                      : c.provider
-                      ? <Chip label={c.provider.name} size="small" variant="outlined" />
-                      : c.recipient_name}
+                    {tabValue === "THIRD_PARTY" ? (
+                      c.drawer_name
+                    ) : c.provider ? (
+                      <Chip
+                        label={c.provider.name}
+                        size="small"
+                        variant="outlined"
+                      />
+                    ) : (
+                      c.recipient_name
+                    )}
                   </TableCell>
                   <TableCell>
                     <Typography fontWeight="bold">
@@ -621,6 +641,97 @@ export const ChecksPage = () => {
         open={Boolean(anchorEl)}
         onClose={() => setAnchorEl(null)}
       >
+        {/* --- CICLO DE VIDA: CHEQUES DE TERCEROS (ENTRADAS) --- */}
+        {tabValue === "THIRD_PARTY" &&
+          selectedCheckId &&
+          (() => {
+            // Buscamos el cheque seleccionado en el array para saber su estado actual
+            const currentCheck = checks.find((c) => c.id === selectedCheckId);
+            if (!currentCheck) return null;
+
+            // 1. ESTÁ EN CARTERA -> DEPOSITAR O RECHAZAR O USAR
+            if (currentCheck.status === "PENDING")
+              return [
+                <MenuItem
+                  key="dep"
+                  onClick={() => handleStatusChange("DEPOSITED")}
+                >
+                  <AccountBalance sx={{ mr: 2, color: "warning.main" }} />{" "}
+                  Depositar en Banco
+                </MenuItem>,
+                <MenuItem key="used" onClick={() => handleStatusChange("USED")}>
+                  <SyncAlt sx={{ mr: 2, color: "text.secondary" }} /> Marcar
+                  como Entregado (Manual)
+                </MenuItem>,
+                <MenuItem
+                  key="rej"
+                  onClick={() => handleStatusChange("REJECTED")}
+                >
+                  <Warning sx={{ mr: 2, color: "error.main" }} /> Marcar como
+                  Rechazado
+                </MenuItem>,
+              ];
+
+            // 2. ESTÁ DEPOSITADO -> CONFIRMAR O REBOTAR
+            if (currentCheck.status === "DEPOSITED")
+              return [
+                <MenuItem key="paid" onClick={() => handleStatusChange("PAID")}>
+                  <AutoFixHigh sx={{ mr: 2, color: "success.main" }} />{" "}
+                  Confirmar Acreditación (Cobrado)
+                </MenuItem>,
+                <MenuItem
+                  key="rej_bank"
+                  onClick={() => handleStatusChange("REJECTED")}
+                >
+                  <Warning sx={{ mr: 2, color: "error.main" }} /> Rechazado por
+                  Banco
+                </MenuItem>,
+              ];
+
+            // 3. ESTÁ RECHAZADO -> VOLVER A CARTERA (Gestiòn de cobro)
+            if (currentCheck.status === "REJECTED")
+              return [
+                <MenuItem
+                  key="pend"
+                  onClick={() => handleStatusChange("PENDING")}
+                >
+                  <SyncAlt sx={{ mr: 2 }} /> Volver a Cartera (Re-negociar)
+                </MenuItem>,
+              ];
+
+            return null;
+          })()}
+
+        {/* --- CICLO DE VIDA: CHEQUES PROPIOS (SALIDAS) --- */}
+        {tabValue === "OWN" &&
+          selectedCheckId &&
+          (() => {
+            const currentCheck = checks.find((c) => c.id === selectedCheckId);
+            if (!currentCheck) return null;
+
+            // 1. EMITIDO -> CONFIRMAR DÉBITO O ANULAR
+            if (currentCheck.status === "PENDING")
+              return [
+                <MenuItem
+                  key="debit"
+                  onClick={() => handleStatusChange("PAID")}
+                >
+                  <AutoFixHigh sx={{ mr: 2, color: "success.main" }} />{" "}
+                  Confirmar Débito en Cuenta
+                </MenuItem>,
+                <MenuItem key="void" onClick={() => handleStatusChange("VOID")}>
+                  <EventBusy sx={{ mr: 2, color: "error.main" }} /> Anular
+                  Cheque
+                </MenuItem>,
+              ];
+
+            return null;
+          })()}
+
+        {/* SIEMPRE DISPONIBLE: OPCIÓN DE CORRECCIÓN (Ver todos) */}
+        <MenuItem disabled>
+          <Typography variant="caption">--- Corrección Manual ---</Typography>
+        </MenuItem>
         {CHECK_STATUSES.map((status) => (
           <MenuItem
             key={status.value}
@@ -631,7 +742,7 @@ export const ChecksPage = () => {
               label={status.label}
               color={status.color as any}
               size="small"
-              sx={{ minWidth: 100, cursor: "pointer" }}
+              variant="outlined"
             />
           </MenuItem>
         ))}
@@ -652,11 +763,15 @@ export const ChecksPage = () => {
             : "Ingresar Cheque"}
         </DialogTitle>
         <DialogContent dividers>
-          
           {/* 👇 3. AQUÍ ESTÁ LA ALERTA VISUAL */}
           {checksOnSameDay > 0 && (
             <Alert severity="warning" sx={{ mb: 2 }}>
-                ⚠️ Atención: Ya tienes <b>{checksOnSameDay} cheque{checksOnSameDay > 1 ? 's' : ''}</b> agendado{checksOnSameDay > 1 ? 's' : ''} para el {formatDate(formData.payment_date)}.
+              ⚠️ Atención: Ya tienes{" "}
+              <b>
+                {checksOnSameDay} cheque{checksOnSameDay > 1 ? "s" : ""}
+              </b>{" "}
+              agendado{checksOnSameDay > 1 ? "s" : ""} para el{" "}
+              {formatDate(formData.payment_date)}.
             </Alert>
           )}
 
@@ -685,31 +800,42 @@ export const ChecksPage = () => {
               />
             </Grid>
             <Grid item xs={6}>
-            <TextField label="F. Emisión" type="date" fullWidth InputLabelProps={{ shrink: true }} value={formData.issue_date} onChange={(e) => setFormData({...formData, issue_date: e.target.value})} />
-        </Grid>
-        
-        {/* INPUT DE FECHA DE COBRO MEJORADO */}
-        <Grid item xs={6}>
-            <TextField 
+              <TextField
+                label="F. Emisión"
+                type="date"
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+                value={formData.issue_date}
+                onChange={(e) =>
+                  setFormData({ ...formData, issue_date: e.target.value })
+                }
+              />
+            </Grid>
+
+            {/* INPUT DE FECHA DE COBRO MEJORADO */}
+            <Grid item xs={6}>
+              <TextField
                 label={`F. Cobro (${getFriendlyDate(formData.payment_date)})`} // Muestra qué día cae (Lun/Mar/etc)
-                type="date" 
-                fullWidth 
-                InputLabelProps={{ shrink: true }} 
-                value={formData.payment_date} 
-                onChange={(e) => setFormData({...formData, payment_date: e.target.value})} 
+                type="date"
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+                value={formData.payment_date}
+                onChange={(e) =>
+                  setFormData({ ...formData, payment_date: e.target.value })
+                }
                 error={!dateValidation.valid} // Se pone rojo si es feriado
-            />
-            {/* Botón rápido debajo del input */}
-            <Button 
-                size="small" 
-                startIcon={<AutoFixHigh />} 
+              />
+              {/* Botón rápido debajo del input */}
+              <Button
+                size="small"
+                startIcon={<AutoFixHigh />}
                 onClick={findBetterDate}
-                sx={{ mt: 0.5, textTransform: 'none' }}
+                sx={{ mt: 0.5, textTransform: "none" }}
                 disabled={checksOnSameDay === 0 && dateValidation.valid} // Se deshabilita si la fecha es perfecta
-            >
+              >
                 Sugerir mejor fecha
-            </Button>
-        </Grid>
+              </Button>
+            </Grid>
             <Grid item xs={12} md={6}>
               <TextField
                 label="Monto"
@@ -800,11 +926,11 @@ export const ChecksPage = () => {
           </Button>
         </DialogActions>
       </Dialog>
-      <BatchChecksDialog 
-    open={openGenerator} 
-    onClose={() => setOpenGenerator(false)} 
-    onSuccess={loadChecks} // Recarga la tabla al terminar
-/>
+      <BatchChecksDialog
+        open={openGenerator}
+        onClose={() => setOpenGenerator(false)}
+        onSuccess={loadChecks} // Recarga la tabla al terminar
+      />
     </Box>
   );
 };

@@ -20,6 +20,11 @@ import {
   TextField,
   MenuItem,
   TableSortLabel,
+  Dialog, // 👈 Nuevo import
+  DialogTitle, // 👈 Nuevo import
+  DialogContent, // 👈 Nuevo import
+  DialogContentText, // 👈 Nuevo import
+  DialogActions, // 👈 Nuevo import
 } from "@mui/material";
 import {
   Add,
@@ -28,6 +33,8 @@ import {
   PictureAsPdf,
   Edit,
   CheckCircle,
+  LocalShipping,
+  Cancel,
 } from "@mui/icons-material";
 import { inventoryService, settingsService } from "../../services/api";
 import { useNotification } from "../../context/NotificationContext";
@@ -36,24 +43,16 @@ import { generatePurchasePDF } from "../../utils/pdfGenerator";
 // Función auxiliar para fechas
 const safeDate = (dateString: any) => {
   if (!dateString) return "-";
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return "-";
-    return date.toLocaleDateString("es-AR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    });
-  } catch {
-    return "-";
-  }
+  const rawDate = dateString.toString().split("T")[0];
+  const [year, month, day] = rawDate.split("-");
+  return `${day}/${month}/${year}`;
 };
 
-// Mapa de Estados para mostrarlos bonitos
+// Mapa de Estados
 const STATUS_MAP: any = {
   DRAFT: { label: "Borrador", color: "default" },
-  ORDERED: { label: "Pedido", color: "warning" },
-  RECEIVED: { label: "Recibido", color: "success" },
+  ORDERED: { label: "Pedido (Enviado)", color: "warning" },
+  RECEIVED: { label: "Recibido (Stock)", color: "success" },
   CANCELLED: { label: "Cancelado", color: "error" },
 };
 
@@ -67,14 +66,20 @@ export const PurchasesPage = () => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [loading, setLoading] = useState(false);
-  const [settings, setSettings] = useState<any>({}); // Para el PDF
+  const [settings, setSettings] = useState<any>({});
+
+  // Estados para Diálogo de Recepción
+  const [openReceiveDialog, setOpenReceiveDialog] = useState(false);
+  const [purchaseToReceive, setPurchaseToReceive] = useState<string | null>(
+    null
+  );
 
   // Filtros
   const [filters, setFilters] = useState({
     provider_id: "",
     start_date: "",
     end_date: "",
-    status: "", // 👈 NUEVO FILTRO
+    status: "",
     sort_by: "date",
     sort_order: "DESC" as "ASC" | "DESC",
   });
@@ -148,6 +153,49 @@ export const PurchasesPage = () => {
     setPage(0);
   };
 
+  // Lógica General de Estados (Cancelación, Envíos simples)
+  const handleStatusChange = async (id: string, newStatus: string) => {
+    let confirmMsg = "";
+    if (newStatus === "ORDERED")
+      confirmMsg =
+        "¿Confirmar pedido? Esto indicará que se envió al proveedor.";
+    if (newStatus === "CANCELLED") confirmMsg = "¿Cancelar esta compra?";
+
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+
+    try {
+      await inventoryService.updatePurchase(id, { status: newStatus });
+      showNotification("Estado actualizado correctamente", "success");
+      loadPurchases();
+    } catch (error) {
+      console.error(error);
+      showNotification("Error al cambiar el estado", "error");
+    }
+  };
+
+  // 👇 NUEVA LÓGICA DE RECEPCIÓN (Con Diálogo)
+  const handleReceiveClick = (id: string) => {
+    setPurchaseToReceive(id);
+    setOpenReceiveDialog(true);
+  };
+
+  const executeReceive = async () => {
+    if (!purchaseToReceive) return;
+    try {
+      await inventoryService.updatePurchase(purchaseToReceive, {
+        status: "RECEIVED",
+      });
+      showNotification("Mercadería recibida y stock actualizado", "success");
+      loadPurchases();
+    } catch (error) {
+      console.error(error);
+      showNotification("Error al recibir mercadería", "error");
+    } finally {
+      setOpenReceiveDialog(false);
+      setPurchaseToReceive(null);
+    }
+  };
+
   return (
     <Box p={3}>
       {/* HEADER */}
@@ -177,7 +225,6 @@ export const PurchasesPage = () => {
       {/* BARRA DE FILTROS */}
       <Paper sx={{ p: 2, mb: 3 }} variant="outlined">
         <Grid container spacing={2} alignItems="center">
-          {/* Filtro Proveedor */}
           <Grid item xs={12} md={3}>
             <TextField
               select
@@ -198,7 +245,6 @@ export const PurchasesPage = () => {
             </TextField>
           </Grid>
 
-          {/* Filtro Estado (NUEVO) */}
           <Grid item xs={6} md={2}>
             <TextField
               select
@@ -218,7 +264,6 @@ export const PurchasesPage = () => {
             </TextField>
           </Grid>
 
-          {/* Filtro Fechas */}
           <Grid item xs={6} md={2}>
             <TextField
               type="date"
@@ -246,7 +291,6 @@ export const PurchasesPage = () => {
             />
           </Grid>
 
-          {/* Botón Limpiar */}
           <Grid item xs={12} md={3}>
             <Button
               fullWidth
@@ -279,7 +323,7 @@ export const PurchasesPage = () => {
                 </TableSortLabel>
               </TableCell>
               <TableCell>PROVEEDOR</TableCell>
-              <TableCell>ESTADO</TableCell> {/* Nueva Columna */}
+              <TableCell>ESTADO</TableCell>
               <TableCell>FACTURA</TableCell>
               <TableCell>SUCURSAL</TableCell>
               <TableCell align="right">TOTAL</TableCell>
@@ -307,7 +351,6 @@ export const PurchasesPage = () => {
                     </Typography>
                   </TableCell>
 
-                  {/* CHIP DE ESTADO */}
                   <TableCell>
                     <Chip
                       label={statusInfo.label}
@@ -328,7 +371,6 @@ export const PurchasesPage = () => {
                   <TableCell>{purchase.branch?.name || "-"}</TableCell>
 
                   <TableCell align="right">
-                    {/* Solo mostramos monto si no es borrador o si el usuario quiere verlo */}
                     <Typography fontWeight="bold" color="success.main">
                       $
                       {(Number(purchase.total) || 0).toLocaleString("es-AR", {
@@ -339,34 +381,78 @@ export const PurchasesPage = () => {
 
                   <TableCell align="center">
                     <Stack direction="row" justifyContent="center" spacing={1}>
-                      {/* PDF Button */}
+                      {/* 1. PDF */}
                       <Tooltip title="Descargar PDF">
                         <IconButton
                           size="small"
                           color="secondary"
-                          onClick={() =>
-                            generatePurchasePDF(purchase, settings)
-                          }
+                          onClick={async () => {
+                            try {
+                              const fullData =
+                                await inventoryService.getPurchaseById(
+                                  purchase.id
+                                );
+                              generatePurchasePDF(fullData, settings);
+                            } catch (e) {
+                              showNotification("Error al generar PDF", "error");
+                            }
+                          }}
                         >
                           <PictureAsPdf fontSize="small" />
                         </IconButton>
                       </Tooltip>
 
-                      {/* Acciones Contextuales */}
-                      {purchase.status === "DRAFT" ? (
-                        <Tooltip title="Continuar Editando">
+                      {/* 2. SI ES BORRADOR: EDITAR Y ENVIAR */}
+                      {purchase.status === "DRAFT" && (
+                        <>
+                          <Tooltip title="Editar Compra">
+                            <IconButton
+                              size="small"
+                              color="primary"
+                              onClick={() =>
+                                navigate(`/inventory/purchases/${purchase.id}`)
+                              }
+                            >
+                              <Edit fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+
+                          <Tooltip title="Confirmar Pedido (Enviar)">
+                            <IconButton
+                              size="small"
+                              sx={{ color: "warning.main" }}
+                              onClick={() =>
+                                handleStatusChange(purchase.id, "ORDERED")
+                              }
+                            >
+                              <LocalShipping fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </>
+                      )}
+
+                      {/* 3. SI ES PEDIDO: RECIBIR MERCADERÍA (BOTÓN MODIFICADO) */}
+                      {purchase.status === "ORDERED" && (
+                        <Tooltip title="Recibir Mercadería (Sumar Stock)">
                           <IconButton
                             size="small"
-                            color="primary"
-                            // Aquí iría la navegación para editar:
-                            // onClick={() => navigate(`/inventory/purchases/edit/${purchase.id}`)}
+                            color="success"
+                            onClick={() => handleReceiveClick(purchase.id)} // 👈 Llama al diálogo
                           >
-                            <Edit fontSize="small" />
+                            <CheckCircle fontSize="small" />
                           </IconButton>
                         </Tooltip>
-                      ) : (
-                        <Tooltip title="Ver Detalles">
-                          <IconButton size="small" color="default">
+                      )}
+
+                      {/* 4. SI YA ESTÁ RECIBIDO: SOLO VER */}
+                      {purchase.status === "RECEIVED" && (
+                        <Tooltip title="Ver Detalle">
+                          <IconButton
+                            size="small"
+                            onClick={() =>
+                              navigate(`/inventory/purchases/${purchase.id}`)
+                            }
+                          >
                             <Visibility fontSize="small" />
                           </IconButton>
                         </Tooltip>
@@ -403,6 +489,49 @@ export const PurchasesPage = () => {
           }}
         />
       </TableContainer>
+
+      {/* 👇 DIÁLOGO DE CONFIRMACIÓN DE RECEPCIÓN */}
+      <Dialog
+        open={openReceiveDialog}
+        onClose={() => setOpenReceiveDialog(false)}
+      >
+        <DialogTitle>📦 Recepción de Mercadería</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Estás a punto de ingresar mercadería al stock.
+            <br />
+            <br />
+            ¿Deseas <b>confirmar la recepción inmediatamente</b> o prefieres{" "}
+            <b>revisar y ajustar</b> los precios/cantidades antes de guardar?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenReceiveDialog(false)} color="inherit">
+            Cancelar
+          </Button>
+
+          <Button
+            variant="outlined"
+            color="primary"
+            onClick={() => {
+              // Navegar a la pantalla de edición
+              navigate(`/inventory/purchases/${purchaseToReceive}`);
+              setOpenReceiveDialog(false);
+            }}
+          >
+            Ir a Revisar
+          </Button>
+
+          <Button
+            variant="contained"
+            color="success"
+            onClick={executeReceive}
+            autoFocus
+          >
+            Confirmar Directo
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

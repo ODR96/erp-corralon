@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import {
   AppBar,
@@ -17,6 +17,7 @@ import {
   MenuItem,
   Collapse,
   Chip,
+  Badge,
 } from "@mui/material";
 import {
   Menu as MenuIcon,
@@ -36,12 +37,14 @@ import {
   Output,
   LocalShipping,
 } from "@mui/icons-material";
+import { financeService } from "../../services/api";
 
 const drawerWidth = 260; // Un poco más ancho para que se lean bien los submenús
 
 export const MainLayout = () => {
   const navigate = useNavigate();
   const location = useLocation(); // Para saber dónde estamos parados
+  const [alertCount, setAlertCount] = useState(0);
 
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
@@ -52,6 +55,20 @@ export const MainLayout = () => {
     inventory: false,
     sales: false,
   });
+
+  useEffect(() => {
+    checkAlerts();
+  }, []);
+
+  const checkAlerts = async () => {
+    try {
+      // Asumiendo que agregaste getUpcomingChecks a financeService
+      const res = await financeService.getUpcomingChecks(); // Debe devolver array
+      setAlertCount(res.length);
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
 
@@ -84,7 +101,7 @@ export const MainLayout = () => {
       text: "Ventas",
       icon: <ShoppingCartIcon />,
       children: [
-        { text: "Nueva Venta", path: "/sales/new" }, // Futuro
+        { text: "Nueva Venta", path: "/sales/pos" }, // Futuro
         { text: "Historial Ventas", path: "/sales" },
         { text: "Clientes", path: "/sales/clients" },
       ],
@@ -116,7 +133,11 @@ export const MainLayout = () => {
         {
           text: "Cartera Cheques",
           path: "/finance/checks",
-          icon: <AccountBalanceWallet fontSize="small" />,
+          icon: (
+            <Badge badgeContent={alertCount} color="error" variant="dot">
+              <AccountBalanceWallet fontSize="small" />
+            </Badge>
+          ),
         },
         // { text: "Cta. Cte. Proveedores", path: "/finance/current-account", icon: <ReceiptLong fontSize="small"/> },
       ],
@@ -321,7 +342,7 @@ export const MainLayout = () => {
               transformOrigin={{ horizontal: "right", vertical: "top" }}
               anchorOrigin={{ horizontal: "right", vertical: "bottom" }}
             >
-              <MenuItem onClick={() => navigate("/settings")}>
+              <MenuItem onClick={() => navigate("/profile")}>
                 Mi Perfil
               </MenuItem>
               <Divider />

@@ -25,7 +25,7 @@ import {
   InputAdornment,
   FormControlLabel,
   Switch,
-  TablePagination, 
+  TablePagination,
 } from "@mui/material";
 import {
   Add,
@@ -38,7 +38,7 @@ import {
   DeleteForever, // <--- Iconos nuevos
 } from "@mui/icons-material";
 import { usersService } from "../services/api";
-import { useNotification } from '../context/NotificationContext';
+import { useNotification } from "../context/NotificationContext";
 
 interface UserData {
   id?: string;
@@ -77,29 +77,34 @@ export const UsersPage = () => {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0); // MUI usa base 0, el Backend base 1
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [search, setSearch] = useState(''); // El valor real para la API
+  const [search, setSearch] = useState(""); // El valor real para la API
 
   // Cargar datos cuando cambia el switch 'showDeleted'
-// Cargar datos cuando cambie: página, límite, búsqueda o filtro de borrados
+  // Cargar datos cuando cambie: página, límite, búsqueda o filtro de borrados
   useEffect(() => {
     loadData();
   }, [page, rowsPerPage, search, showDeleted]);
 
-const loadData = async () => {
+  const loadData = async () => {
     try {
       // Backend espera page base 1 (1, 2, 3...)
-      const usersResponse = await usersService.getAll(showDeleted, page + 1, rowsPerPage, search);
+      const usersResponse = await usersService.getAll(
+        showDeleted,
+        page + 1,
+        rowsPerPage,
+        search
+      );
       const rolesData = await usersService.getRoles();
       const branchesData = await usersService.getBranches(); // Si ya tienes esto
 
       setUsers(usersResponse.data); // Los usuarios de esta página
       setTotal(usersResponse.total); // El número total en la base de datos
-      
+
       setRoles(rolesData);
       setBranches(branchesData);
     } catch (error) {
       console.error("Error cargando datos", error);
-      showNotification("Error de conexión", "error" );
+      showNotification("Error de conexión", "error");
     }
   };
 
@@ -108,15 +113,17 @@ const loadData = async () => {
     setPage(newPage);
   };
 
-  const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChangeRowsPerPage = (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
     setRowsPerPage(parseInt(event.target.value, 10));
     setPage(0); // Volver a la primera página
   };
 
   // Manejador del Buscador (Con un pequeño delay o directo)
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-     setSearch(e.target.value);
-     setPage(0); // Resetear a pág 1 al buscar
+    setSearch(e.target.value);
+    setPage(0); // Resetear a pág 1 al buscar
   };
 
   const filteredUsers = users.filter(
@@ -180,10 +187,10 @@ const loadData = async () => {
         if (!updatePayload.password) delete updatePayload.password;
 
         await usersService.update(formData.id, updatePayload);
-        showNotification("Usuario actualizado", "success" );
+        showNotification("Usuario actualizado", "success");
       } else {
         await usersService.create(formData);
-        showNotification("Usuario creado",  "success" );
+        showNotification("Usuario creado", "success");
       }
       handleClose();
       loadData();
@@ -208,11 +215,11 @@ const loadData = async () => {
         await usersService.delete(id, isAlreadyDeleted);
         showNotification(
           isAlreadyDeleted ? "Usuario destruido" : "Usuario enviado a papelera",
-           "success" 
+          "success"
         );
         loadData();
       } catch (err) {
-        showNotification("Error al eliminar",  "error" );
+        showNotification("Error al eliminar", "error");
       }
     }
   };
@@ -220,10 +227,10 @@ const loadData = async () => {
   const handleRestore = async (id: string) => {
     try {
       await usersService.restore(id);
-      showNotification("Usuario restaurado", "success" );
+      showNotification("Usuario restaurado", "success");
       loadData();
     } catch (err) {
-      showNotification("Error al restaurar",  "error" );
+      showNotification("Error al restaurar", "error");
     }
   };
 
@@ -288,11 +295,13 @@ const loadData = async () => {
               <TableCell align="right">Acciones</TableCell>
             </TableRow>
           </TableHead>
-<TableBody>
+          <TableBody>
             {users.length > 0 ? (
-              users.map((user) => { // <--- ABRIMOS LLAVE
-                const isDeleted = !!user.deleted_at; 
-                return ( // <--- ABRIMOS PARÉNTESIS DEL RETURN
+              users.map((user) => {
+                // <--- ABRIMOS LLAVE
+                const isDeleted = !!user.deleted_at;
+                return (
+                  // <--- ABRIMOS PARÉNTESIS DEL RETURN
                   <TableRow
                     key={user.id}
                     sx={{ bgcolor: isDeleted ? "#fff4f4" : "inherit" }}
@@ -435,11 +444,12 @@ const loadData = async () => {
                     setFormData({ ...formData, roleId: e.target.value })
                   }
                 >
-                  {roles.map((role) => (
-                    <MenuItem key={role.id} value={role.id}>
-                      {role.name}
-                    </MenuItem>
-                  ))}
+                  {Array.isArray(roles) &&
+                    roles.map((role) => (
+                      <MenuItem key={role.id} value={role.id}>
+                        {role.name}
+                      </MenuItem>
+                    ))}
                 </Select>
               </FormControl>
               <FormControl fullWidth>

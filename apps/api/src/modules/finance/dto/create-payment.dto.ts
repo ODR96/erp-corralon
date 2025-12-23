@@ -21,6 +21,10 @@ export class CreatePaymentDto {
     cash_amount?: number; // Efectivo
 
     @IsOptional()
+    @IsString()
+    transfer_reference?: string;
+
+    @IsOptional()
     @IsNumber()
     @Min(0)
     transfer_amount?: number; // Transferencia Bancaria

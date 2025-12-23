@@ -65,6 +65,8 @@ export class Product {
     @Column('decimal', { precision: 10, scale: 2, default: 0 })
     sale_price: number; // Precio Final
 
+    @Column('decimal', { precision: 10, scale: 2, default: 0 })
+    total_stock: number;
 
     @OneToMany(() => Stock, (stock) => stock.product)
     stocks: Stock[]

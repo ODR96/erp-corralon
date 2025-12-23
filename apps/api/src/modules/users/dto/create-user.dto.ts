@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, MinLength, IsUUID, IsOptional } from 'class-validator';
+import { IsEmail, IsNotEmpty, MinLength, IsUUID, IsOptional, IsBoolean } from 'class-validator';
 
 export class CreateUserDto {
     @IsNotEmpty({ message: 'El nombre es obligatorio' })
@@ -16,4 +16,12 @@ export class CreateUserDto {
     @IsOptional()
     @IsUUID()
     branchId?: string;
+
+    @IsOptional()
+    @IsBoolean()
+    is_super_admin?: boolean;
+
+    @IsOptional()
+    @IsUUID() // Esto permite pasar el ID de la empresa destino (solo para Super Admins)
+    tenant_id?: string;
 }

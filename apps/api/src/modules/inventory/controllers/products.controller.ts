@@ -24,8 +24,8 @@ export class ProductsController {
     @Get()
     // @RequirePermissions('stock.view') // Opcional: Podrías pedir permiso para ver
     findAll(
-        @Query('page') page: number,
-        @Query('limit') limit: number,
+        @Query('page') page: string,
+        @Query('limit') limit: string,
         @Query('search') search: string,
         @Query('categoryId') categoryId: string,
         @Query('providerId') providerId: string,
@@ -34,16 +34,26 @@ export class ProductsController {
     ) {
         // 👇 FIX CRÍTICO: El tenant ahora viene anidado
         const tenantId = req.user.tenant?.id;
+        const pageNumber = page ? Number(page) : 1;
+        const limitNumber = limit ? Number(limit) : 100;
 
         return this.productsService.findAll(
-            page,
-            limit,
+            pageNumber,
+            limitNumber,
             tenantId,
             search,
             categoryId,
             providerId,
             withDeleted === 'true' // Convertimos string a boolean
         );
+    }
+
+    @Get(':id')
+    //@RequirePermissions('products.list') // Comenta esto temporalmente para descartar permisos
+    findOne(@Param('id') id: string, @Request() req: any) {
+        console.log("📢 PETICIÓN RECIBIDA para ID:", id); // <--- AGREGA ESTO
+        console.log("🏢 Tenant ID:", req.user.tenantId);   // <--- AGREGA ESTO
+        return this.productsService.findOne(id, req.user.tenantId);
     }
 
     @Patch(':id')

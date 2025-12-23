@@ -2,6 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, Jo
 import { Product } from './product.entity';
 import { Branch } from '../../tenants/entities/branch.entity';
 import { User } from '../../users/entities/user.entity';
+import { Tenant } from 'src/modules/tenants/entities/tenant.entity';
 
 export enum MovementType {
     IN = 'IN',       // Compras, Devoluciones, Ajuste positivo
@@ -34,6 +35,10 @@ export class StockMovement {
     @ManyToOne(() => Branch)
     @JoinColumn({ name: 'branch_id' })
     branch: Branch;
+
+    @ManyToOne(() => Tenant)
+    @JoinColumn({ name: 'tenant_id' })
+    tenant: Tenant;
 
     @ManyToOne(() => User)
     @JoinColumn({ name: 'user_id' })

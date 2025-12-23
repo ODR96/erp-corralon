@@ -4,11 +4,13 @@ import { Repository, ILike } from 'typeorm';
 import { Product } from '../entities/product.entity';
 import { CreateProductDto } from '../dto/create-product.dto';
 import { UpdateProductDto } from '../dto/update-product.dto';
+import { Stock } from '../entities/stock.entity';
 
 @Injectable()
 export class ProductsService {
     constructor(
         @InjectRepository(Product) private productRepo: Repository<Product>,
+        @InjectRepository(Stock) private stockRepo: Repository<Stock>,
     ) { }
 
     async create(createProductDto: CreateProductDto, tenantId: string) {
@@ -86,15 +88,28 @@ export class ProductsService {
         return { data: enrichedProducts, total };
     }
 
-    async findOne(id: string) {
-        const product = await this.productRepo.findOne({
-            where: { id },
-            relations: ['category', 'unit', 'provider']
-        });
+    async findOne(id: string, tenantId?: string) {
+        // Usamos QueryBuilder para hacer uniones (Joins) más complejas y traer el stock
+        const query = this.productRepo.createQueryBuilder('product')
+            .leftJoinAndSelect('product.category', 'category')
+            .leftJoinAndSelect('product.unit', 'unit')
+            .leftJoinAndSelect('product.provider', 'provider')
+            // 👇 ESTO ES LO IMPORTANTE: Traer stocks y la sucursal de cada stock
+            .leftJoinAndSelect('product.stocks', 'stocks')
+            .leftJoinAndSelect('stocks.branch', 'branch')
+            .where('product.id = :id', { id });
+
+        // Seguridad: Si pasamos tenantId, filtramos para que no vean productos de otro
+        if (tenantId) {
+            query.andWhere('product.tenant_id = :tenantId', { tenantId });
+        }
+
+        const product = await query.getOne();
+
         if (!product) throw new NotFoundException('Producto no encontrado');
         return product;
     }
-
+    
     async update(id: string, updateProductDto: UpdateProductDto) {
         const product = await this.findOne(id);
 
@@ -149,5 +164,72 @@ export class ProductsService {
         }
         // Si es otro error, que explote normalmente
         throw error;
+    }
+
+    async addStock(productId: string, quantity: number, tenantId: string, branchId?: string) {
+        if (!branchId) {
+            console.warn(`Intento de agregar stock al producto ${productId} sin especificar sucursal.`);
+            return null; // O lanzar error según prefieras
+        }
+
+        // 1. Buscamos si ya existe stock para este producto en esa sucursal
+        let stockRecord = await this.stockRepo.findOne({
+            where: {
+                product: { id: productId },
+                branch: { id: branchId },
+                tenant: { id: tenantId }
+            }
+        });
+
+        // 2. Si no existe, lo inicializamos en 0
+        if (!stockRecord) {
+            stockRecord = this.stockRepo.create({
+                product: { id: productId },
+                branch: { id: branchId },
+                quantity: 0,
+                tenant: { id: tenantId }
+            });
+        }
+
+        // 3. Sumamos
+        stockRecord.quantity = Number(stockRecord.quantity) + Number(quantity);
+
+        // 4. Guardamos
+        return this.stockRepo.save(stockRecord);
+    }
+
+    async updateProductCosts(id: string, newCost: number, newSalePrice: number, tenantId: string) {
+        // 1. Buscamos el producto completo
+        const product = await this.productRepo.findOne({ where: { id, tenant: { id: tenantId } } });
+
+        if (!product) {
+            console.error(`Producto ${id} no encontrado al intentar actualizar costos.`);
+            return;
+        }
+
+        // 2. Actualizamos Costo y Venta (Lo básico)
+        product.cost_price = Number(newCost);
+        product.sale_price = Number(newSalePrice);
+
+        // 3. 👇 ACTUALIZACIÓN INTELIGENTE DE PRECIO LISTA
+        // Si el producto tiene un descuento configurado, recalculamos el precio de lista 
+        // para que coincida con el nuevo costo.
+        // Fórmula: Costo = Lista * (1 - Desc/100)  --->  Lista = Costo / (1 - Desc/100)
+
+        const discount = Number(product.provider_discount) || 0;
+
+        if (discount > 0 && discount < 100) {
+            // Evitamos división por cero si el descuento fuera 100%
+            const newListPrice = newCost / (1 - (discount / 100));
+            product.list_price = Number(newListPrice.toFixed(2)); // Redondeamos a 2 decimales
+        } else {
+            // Si no tiene descuento, el Precio Lista es igual al Costo
+            product.list_price = Number(newCost);
+        }
+
+        // 4. Guardamos todo junto
+        await this.productRepo.save(product);
+
+        console.log(`✅ ${product.name} actualizado: Lista $${product.list_price} | Costo $${product.cost_price} | Venta $${product.sale_price}`);
     }
 }

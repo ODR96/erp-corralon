@@ -24,20 +24,20 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
             throw new UnauthorizedException();
         }
 
-        // 1. Buscamos el usuario REAL en la base de datos
         const user = await this.userRepository.findOne({
             where: { id: payload.sub },
-            // 👇 CARGAMOS LA ARTILLERÍA PESADA: Rol, Permisos y Tenant
-            relations: ['role', 'role.permissions', 'tenant', 'branch'] 
+            relations: ['role', 'role.permissions', 'tenant', 'branch']
         });
 
-        // 2. Si no existe o está inactivo (soft delete o flag), afuera.
-        // Esto es seguridad extra: Si borras al usuario mientras tiene el token, aquí lo frenas.
         if (!user || !user.is_active) {
             throw new UnauthorizedException('Usuario inactivo o no encontrado');
         }
 
-        // 3. Devolvemos el usuario completo (con permisos) al Request
-        return user;
+        // 👇 CAMBIO CLAVE: Aplanamos el tenantId para que los Controllers lo lean fácil
+        return {
+            ...user, // Mantenemos todos los datos del usuario
+            tenantId: user.tenant?.id, // 👈 ¡ESTO ES LO QUE FALTABA!
+            branchId: user.branch?.id  // De paso agregamos el branchId
+        };
     }
 }

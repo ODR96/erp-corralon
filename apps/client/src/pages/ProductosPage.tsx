@@ -34,17 +34,15 @@ import {
   Edit,
   Delete,
   Search,
-  QrCodeScanner,
-  AttachMoney,
-  Clear,
-  Info,
-  Inventory2,
+  Store, // Icono para la tabla de stock
   TrendingUp,
   TrendingDown,
   RestoreFromTrash,
-  DeleteForever, ShoppingCart
+  DeleteForever,
+  ShoppingCart,
+  Inventory2,
 } from "@mui/icons-material";
-import { useNotification } from '../context/NotificationContext';
+import { useNotification } from "../context/NotificationContext";
 import { inventoryService, settingsService } from "../services/api";
 import { useNavigate } from "react-router-dom";
 
@@ -73,12 +71,61 @@ const initialForm = {
   min_stock_alert: 5,
 };
 
+// --- SUB-COMPONENTE: TABLA DE STOCK POR SUCURSAL ---
+const StockPerBranchTable = ({ stocks }: { stocks: any[] }) => {
+  if (!stocks || stocks.length === 0) {
+    return (
+      <Box bgcolor="#f5f5f5" p={2} borderRadius={1} textAlign="center">
+        <Typography variant="caption" color="text.secondary">
+          No hay stock registrado en ninguna sucursal.
+        </Typography>
+      </Box>
+    );
+  }
+
+  return (
+    <Box mt={2}>
+      <Typography
+        variant="subtitle2"
+        gutterBottom
+        fontWeight="bold"
+        display="flex"
+        alignItems="center"
+        gap={1}
+      >
+        <Store fontSize="small" color="primary" /> Existencias por Sucursal
+      </Typography>
+      <TableContainer component={Paper} variant="outlined">
+        <Table size="small">
+          <TableHead sx={{ bgcolor: "#f5f5f5" }}>
+            <TableRow>
+              <TableCell>Sucursal</TableCell>
+              <TableCell align="right">Cantidad</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {stocks.map((stock) => (
+              <TableRow key={stock.id}>
+                <TableCell>
+                  {stock.branch?.name || "Sucursal Eliminada"}
+                </TableCell>
+                <TableCell align="right" sx={{ fontWeight: "bold" }}>
+                  {stock.quantity}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Box>
+  );
+};
+
 export const ProductsPage = () => {
   const { showNotification } = useNotification();
   const navigate = useNavigate();
 
-
-  // Estados
+  // Estados Principales
   const [products, setProducts] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [exchangeRate, setExchangeRate] = useState(1);
@@ -98,13 +145,16 @@ export const ProductsPage = () => {
   const [filterProv, setFilterProv] = useState("");
   const [withDeleted, setWithDeleted] = useState(false);
 
-  // Modales
+  // Modales ABM
   const [open, setOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<any>(initialForm);
 
-  // Stock Modal
+  // Estado para el detalle de stock en el modal de edición
+  const [stockDetails, setStockDetails] = useState<any[]>([]);
+
+  // Stock Modal (Ajuste Rápido)
   const [stockOpen, setStockOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [currentStock, setCurrentStock] = useState(0);
@@ -119,6 +169,7 @@ export const ProductsPage = () => {
   useEffect(() => {
     loadAuxData();
   }, []);
+
   useEffect(() => {
     loadProducts();
   }, [page, rowsPerPage, search, filterCat, filterProv, withDeleted]);
@@ -177,12 +228,13 @@ export const ProductsPage = () => {
       setProducts(res.data);
       setTotal(res.total);
     } catch (err) {
-      showNotification("Error cargando productos", "error" );
+      showNotification("Error cargando productos", "error");
     }
   };
 
   // --- HANDLERS ---
-  // Calculadora
+
+  // Calculadora de Precios
   useEffect(() => {
     if (!open) return;
     const listPrice = Number(formData.list_price) || 0;
@@ -218,7 +270,7 @@ export const ProductsPage = () => {
     roundingRule,
   ]);
 
-  // Stock
+  // Stock Modal Handlers
   const handleOpenStock = async (product: any) => {
     setSelectedProduct(product);
     setStockOpen(true);
@@ -257,9 +309,10 @@ export const ProductsPage = () => {
     }
   };
 
-  // ABM
-  const handleOpen = (product?: any) => {
+  // ABM Handlers
+  const handleOpen = async (product?: any) => {
     if (product) {
+      // 1. Cargamos datos básicos del listado para que se vea rápido
       setFormData({
         ...initialForm,
         ...product,
@@ -276,15 +329,25 @@ export const ProductsPage = () => {
       });
       setEditingId(product.id);
       setIsEditing(true);
+
+      // 2. Traemos el detalle completo (incluyendo STOCKS) del backend
+      setStockDetails([]); // Limpiamos anterior
+      try {
+        const fullProduct = await inventoryService.getProduct(product.id);
+        setStockDetails(fullProduct.stocks || []);
+      } catch (error) {
+        console.error("Error cargando detalles de stock", error);
+      }
     } else {
       setIsEditing(false);
+      setStockDetails([]);
       const defaultCat =
         categories.find((c) => c.name === "General" || c.name === "Varios")
           ?.id || "";
       const defaultUnit =
         units.find((u) => u.short_name === "u" || u.name === "Unidad")?.id ||
         "";
-      setFormData((prev) => ({
+      setFormData((prev: any) => ({
         ...initialForm,
         currency: prev.currency || "ARS",
         profit_margin: prev.profit_margin || 30,
@@ -316,9 +379,10 @@ export const ProductsPage = () => {
         sale_price: Number(formData.sale_price),
         min_stock_alert: Number(formData.min_stock_alert),
       };
+
       if (isEditing && editingId) {
         await inventoryService.updateProduct(editingId, payload);
-        showNotification("Producto actualizado", "success" );
+        showNotification("Producto actualizado", "success");
       } else {
         await inventoryService.createProduct(payload);
         showNotification("Producto creado", "success");
@@ -326,11 +390,10 @@ export const ProductsPage = () => {
       setOpen(false);
       loadProducts();
     } catch (err: any) {
-      showNotification("Error al guardar","error" );
+      showNotification("Error al guardar", "error");
     }
   };
 
-  // Papelera
   const handleDelete = async (id: string) => {
     if (confirm("¿Enviar producto a papelera?")) {
       await inventoryService.deleteProduct(id, false);
@@ -342,7 +405,6 @@ export const ProductsPage = () => {
     loadProducts();
   };
 
-  // Eliminación Definitiva (Hard Delete)
   const handleHardDelete = async (id: string) => {
     if (
       confirm(
@@ -350,13 +412,13 @@ export const ProductsPage = () => {
       )
     ) {
       try {
-        await inventoryService.deleteProduct(id, true); // true = hard delete
+        await inventoryService.deleteProduct(id, true);
         showNotification("Producto eliminado definitivamente", "success");
         loadProducts();
       } catch (err: any) {
         showNotification(
           "No se puede eliminar: Probablemente tenga stock o ventas asociadas.",
-          "error" 
+          "error"
         );
       }
     }
@@ -380,22 +442,24 @@ export const ProductsPage = () => {
             Gestión de productos y precios
           </Typography>
         </Box>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={() => handleOpen()}
-          size="large"
-        >
-          Nuevo Producto
-        </Button>
-        <Button 
-        variant="contained" 
-        color="secondary" // Color diferente para distinguir
-        startIcon={<ShoppingCart />}
-        onClick={() => navigate('/inventory/purchases/new')}
-    >
-        Ingresar Compra
-    </Button>
+        <Box display="flex" gap={2}>
+          <Button
+            variant="contained"
+            color="secondary"
+            startIcon={<ShoppingCart />}
+            onClick={() => navigate("/inventory/purchases/new")}
+          >
+            Ingresar Compra
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            onClick={() => handleOpen()}
+            size="large"
+          >
+            Nuevo Producto
+          </Button>
+        </Box>
       </Stack>
 
       {/* FILTROS CARD */}
@@ -431,7 +495,6 @@ export const ProductsPage = () => {
                 ))}
               </TextField>
             </Grid>
-            {/* FILTRO PROVEEDOR RESTAURADO */}
             <Grid item xs={6} md={2}>
               <TextField
                 select
@@ -613,7 +676,6 @@ export const ProductsPage = () => {
                             <RestoreFromTrash fontSize="small" />
                           </IconButton>
                         </Tooltip>
-                        {/* BOTÓN ELIMINAR DEFINITIVO RESTAURADO */}
                         <Tooltip title="Eliminar Definitivamente">
                           <IconButton
                             size="small"
@@ -685,6 +747,7 @@ export const ProductsPage = () => {
       </TableContainer>
 
       {/* --- MODALES --- */}
+
       {/* MODAL AJUSTE DE STOCK */}
       <Dialog
         open={stockOpen}
@@ -888,6 +951,14 @@ export const ProductsPage = () => {
                   ))}
                 </TextField>
               </Grid>
+
+              {/* 👇 AQUÍ INSERTAMOS LA TABLA DE STOCK SI ESTAMOS EDITANDO */}
+              {isEditing && (
+                <Grid item xs={12}>
+                  <StockPerBranchTable stocks={stockDetails} />
+                </Grid>
+              )}
+
               <Grid item xs={12}>
                 <Divider />
               </Grid>

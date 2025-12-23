@@ -13,11 +13,9 @@ import {
   Button,
   Chip,
   CircularProgress,
-  IconButton,
   Grid,
   Card,
   CardContent,
-  Divider,
 } from "@mui/material";
 import {
   ArrowBack,
@@ -25,6 +23,8 @@ import {
   TrendingUp,
   TrendingDown,
   ReceiptLong,
+  Payment,
+  Edit,
 } from "@mui/icons-material";
 import { financeService } from "../services/api";
 import { ManualMovementDialog } from "../components/finance/ManualMovementDialog";
@@ -33,8 +33,8 @@ export const AccountDetailsPage = () => {
   const { id, type } = useParams(); // type puede ser 'client' o 'provider'
   const navigate = useNavigate();
   const location = useLocation();
-  const [openPayment, setOpenPayment] = useState(false);
-  // Nombre de la entidad (lo pasamos por state al navegar para no hacer otro fetch)
+  const [openManualDialog, setOpenManualDialog] = useState(false);
+
   const entityName = (location.state as any)?.name || "Cuenta Corriente";
 
   const [balance, setBalance] = useState(0);
@@ -65,15 +65,13 @@ export const AccountDetailsPage = () => {
       style: "currency",
       currency: "ARS",
     }).format(val);
+
   const formatDate = (dateStr: string) =>
     new Date(dateStr).toLocaleDateString("es-AR", {
       hour: "2-digit",
       minute: "2-digit",
     });
 
-  // Colores según el tipo de movimiento
-  // DEBIT (Debe) = Rojo para clientes (Aumenta deuda)
-  // CREDIT (Haber) = Verde para clientes (Paga)
   const getMovementColor = (movType: string) =>
     movType === "DEBIT" ? "error.main" : "success.main";
 
@@ -94,7 +92,8 @@ export const AccountDetailsPage = () => {
             {entityName}
           </Typography>
           <Typography variant="subtitle1" color="textSecondary">
-            Historial de movimientos y saldo actual
+            Historial de movimientos y saldo actual (
+            {type === "client" ? "Cliente" : "Proveedor"})
           </Typography>
         </Grid>
         <Grid item xs={12} md={4}>
@@ -125,19 +124,51 @@ export const AccountDetailsPage = () => {
         </Grid>
       </Grid>
 
-      {/* ACCIONES RÁPIDAS (Próximamente) */}
+      {/* BOTONES DE ACCIÓN INTELIGENTES */}
       <Box mb={3} display="flex" gap={2}>
-        <Button
-          variant="contained"
-          color="success"
-          startIcon={<Add />}
-          onClick={() => setOpenPayment(true)}
-        >
-          Registrar Pago
-        </Button>
-        <Button variant="outlined" startIcon={<ReceiptLong />}>
-          Nueva Venta
-        </Button>
+        {type === "provider" ? (
+          // --- ACCIONES PARA PROVEEDOR ---
+          <>
+            <Button
+              variant="contained"
+              color="primary" // Azul para diferenciar
+              size="large"
+              startIcon={<Payment />}
+              // Pasamos el providerId para que la pantalla de pago se pre-cargue
+              onClick={() =>
+                navigate("/finance/payments/new", { state: { providerId: id } })
+              }
+            >
+              Nueva Orden de Pago
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<Edit />}
+              onClick={() => setOpenManualDialog(true)}
+            >
+              Ajuste Manual
+            </Button>
+          </>
+        ) : (
+          // --- ACCIONES PARA CLIENTE ---
+          <>
+            <Button
+              variant="contained"
+              color="success"
+              startIcon={<Add />}
+              onClick={() => setOpenManualDialog(true)}
+            >
+              Registrar Cobro
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<ReceiptLong />}
+              // onClick={() => navigate('/sales/new')} // Descomentar cuando exista
+            >
+              Nueva Venta
+            </Button>
+          </>
+        )}
       </Box>
 
       {/* TABLA DE MOVIMIENTOS */}
@@ -158,6 +189,12 @@ export const AccountDetailsPage = () => {
                   <CircularProgress />
                 </TableCell>
               </TableRow>
+            ) : movements.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={4} align="center">
+                  Sin movimientos registrados.
+                </TableCell>
+              </TableRow>
             ) : (
               movements.map((m) => (
                 <TableRow key={m.id}>
@@ -166,7 +203,11 @@ export const AccountDetailsPage = () => {
                     <Chip
                       label={m.concept}
                       size="small"
-                      color={m.concept === "PAYMENT" ? "success" : "default"}
+                      color={
+                        m.concept === "PAYMENT" || m.concept === "CHECK"
+                          ? "success"
+                          : "default"
+                      }
                       variant="outlined"
                     />
                   </TableCell>
@@ -207,21 +248,16 @@ export const AccountDetailsPage = () => {
                 </TableRow>
               ))
             )}
-            {movements.length === 0 && !loading && (
-              <TableRow>
-                <TableCell colSpan={4} align="center">
-                  Sin movimientos registrados.
-                </TableCell>
-              </TableRow>
-            )}
           </TableBody>
         </Table>
       </TableContainer>
+
+      {/* DIÁLOGO MANUAL (Para ajustes o cobros rápidos) */}
       {id && type && (
         <ManualMovementDialog
-          open={openPayment}
-          onClose={() => setOpenPayment(false)}
-          onSuccess={loadAccount} // Recarga la tabla al guardar
+          open={openManualDialog}
+          onClose={() => setOpenManualDialog(false)}
+          onSuccess={loadAccount}
           entityId={id}
           type={type as "client" | "provider"}
         />

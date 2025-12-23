@@ -1,229 +1,229 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, Between, Like } from 'typeorm';
-import { Purchase, PurchaseItem, PurchaseStatus } from '../entities/purchase.entity';
-import { Product } from '../entities/product.entity';
-import { CurrentAccountService } from '../../finance/services/current-account.service'; // Importamos Finanzas
-import { MovementType, MovementConcept } from '../../finance/entities/current-account.entity';
-import { Stock } from '../entities/stock.entity';
+import { Repository } from 'typeorm';
+import { Purchase, PurchaseStatus } from '../entities/purchase.entity';
+import { PurchaseDetail } from '../entities/purchase-detail.entity';
+import { CreatePurchaseDto } from '../dto/create-purchase.dto';
+import { UpdatePurchaseDto } from '../dto/update-purchase.dto';
+import { ProductsService } from './products.service';
+// 👇 CORRECCIÓN 1: Usamos TenantConfig porque es lo que tienes en tu Module
+import { TenantConfig } from '../../tenants/entities/tenant-config.entity';
 
 @Injectable()
 export class PurchasesService {
     constructor(
         @InjectRepository(Purchase) private purchaseRepo: Repository<Purchase>,
-        private dataSource: DataSource, // Usamos DataSource para Transacciones (Todo o nada)
-        private accountService: CurrentAccountService, // Para generar deuda
+        @InjectRepository(PurchaseDetail) private detailRepo: Repository<PurchaseDetail>,
+        // 👇 CORRECCIÓN 2: Inyectamos TenantConfig (coincide con InventoryModule)
+        @InjectRepository(TenantConfig) private settingsRepo: Repository<TenantConfig>,
+        private readonly productsService: ProductsService,
     ) { }
 
-    async create(data: any, tenantId: string) {
-        const queryRunner = this.dataSource.createQueryRunner();
-        await queryRunner.connect();
-        await queryRunner.startTransaction();
+    // --- CREAR ---
+    async create(dto: CreatePurchaseDto, tenantId: string) {
+        const purchase = this.purchaseRepo.create({
+            date: new Date(dto.date),
+            invoice_number: dto.invoice_number,
+            observation: dto.observation,
+            status: dto.status || PurchaseStatus.DRAFT,
+            total: dto.total || 0,
+            provider: { id: dto.provider_id },
+            branch: dto.branch_id ? { id: dto.branch_id } : undefined,
+            tenant: { id: tenantId },
+            currency: dto.currency || 'ARS',
+            exchange_rate: dto.exchange_rate || 1
+        });
 
-        try {
-            const branchId = data.branch_id;
-            // Si no mandan estado, asumimos RECIBIDO (para mantener comportamiento anterior) o DRAFT
-            const status = data.status || PurchaseStatus.RECEIVED;
+        const savedPurchase = await this.purchaseRepo.save(purchase);
 
-            // 1. Guardar la Cabecera
-            const purchase = new Purchase();
-            purchase.date = data.date;
-            purchase.invoice_number = data.invoice_number;
-            purchase.total = data.total;
-            purchase.provider = { id: data.provider_id } as any;
-            purchase.observation = data.observation;
-            purchase.tenant = { id: tenantId } as any;
-            purchase.branch = { id: branchId } as any;
-            purchase.status = status; // 👈 Guardamos el estado
-
-            const savedPurchase = await queryRunner.manager.save(purchase);
-
-            // 2. Guardar Ítems (Siempre se guardan los ítems, muevan stock o no)
-            for (const itemDto of data.items) {
-                const item = new PurchaseItem();
-                item.purchase = savedPurchase;
-                item.product = { id: itemDto.product_id } as any;
-                item.quantity = itemDto.quantity;
-                item.cost = itemDto.cost;
-                item.subtotal = itemDto.quantity * itemDto.cost;
-                await queryRunner.manager.save(item);
-            }
-
-            // 3. LOGICA CONDICIONAL: Solo si es RECEIVED movemos las cosas reales
-            if (status === PurchaseStatus.RECEIVED) {
-                await this.executeStockAndDebt(savedPurchase, data.items, branchId, tenantId, queryRunner);
-            }
-
-            await queryRunner.commitTransaction();
-            return savedPurchase;
-
-        } catch (err) {
-            await queryRunner.rollbackTransaction();
-            throw new BadRequestException('Error al registrar la compra: ' + err.message);
-        } finally {
-            await queryRunner.release();
-        }
-    }
-
-    async confirmPurchase(id: string, tenantId: string) {
-        const queryRunner = this.dataSource.createQueryRunner();
-        await queryRunner.connect();
-        await queryRunner.startTransaction();
-
-        try {
-            // 1. Buscamos la compra completa
-            const purchase = await queryRunner.manager.findOne(Purchase, {
-                where: { id, tenant: { id: tenantId } },
-                relations: ['provider', 'branch', 'items', 'items.product'],
+        if (dto.items && dto.items.length > 0) {
+            const details = dto.items.map(item => {
+                return this.detailRepo.create({
+                    purchase: savedPurchase,
+                    product: { id: item.product_id },
+                    quantity: item.quantity,
+                    cost: item.cost,
+                    profit_margin: item.profit_margin || 0,
+                    vat_rate: item.vat_rate || 0,
+                    sale_price: item.sale_price || 0
+                });
             });
-
-            if (!purchase) throw new BadRequestException('Compra no encontrada');
-            if (purchase.status === PurchaseStatus.RECEIVED) throw new BadRequestException('Esta compra ya fue recibida');
-
-            // 2. Ejecutamos los movimientos
-            // Necesitamos el branch_id (asumimos que está en la compra o lo sacamos de la relación)
-            // Nota: Si purchase.branch es una relación, asegúrate de cargarla en el findOne o tener el ID.
-            // Aquí asumiré que purchase tiene branchId accesible o lo cargamos.
-            // Para este ejemplo, carguémoslo en el findOne de arriba: relations: [..., 'branch']
-
-            await this.executeStockAndDebt(
-                purchase,
-                // Mapeamos los items al formato que espera la función auxiliar
-                purchase.items.map(i => ({
-                    product_id: i.product.id,
-                    quantity: i.quantity,
-                    cost: i.cost
-                })),
-                purchase.branch.id,
-                tenantId,
-                queryRunner
-            );
-
-            // 3. Cambiar estado a RECEIVED
-            purchase.status = PurchaseStatus.RECEIVED;
-            await queryRunner.manager.save(purchase);
-
-            await queryRunner.commitTransaction();
-            return purchase;
-
-        } catch (err) {
-            await queryRunner.rollbackTransaction();
-            throw err;
-        } finally {
-            await queryRunner.release();
+            await this.detailRepo.save(details);
         }
+
+        // 3. Impacto (si nace ya recibida)
+        if (savedPurchase.status === PurchaseStatus.RECEIVED) {
+            // 👇 CORRECCIÓN CRÍTICA DEL ERROR "not iterable":
+            // Recargamos la compra completa para tener los 'details' antes de llamar a impactar
+            const fullPurchase = await this.findOne(savedPurchase.id, tenantId);
+            await this.impactStockAndCosts(fullPurchase, tenantId);
+        }
+
+        return this.findOne(savedPurchase.id, tenantId);
     }
 
-    private async executeStockAndDebt(purchase: Purchase, items: any[], branchId: string, tenantId: string, queryRunner: any) {
+    // --- ACTUALIZAR ---
+    async update(id: string, dto: UpdatePurchaseDto, tenantId: string) {
+        const purchase = await this.findOne(id, tenantId);
 
-        // A. MOVER STOCK
-        for (const itemDto of items) {
-            // ... Lógica de Stock (buscar StockRecord, sumar, guardar) ...
-            // (Copia aquí tu lógica de Stock existente)
-            const stockRecord = await queryRunner.manager.findOne(Stock, {
-                where: { product: { id: itemDto.product_id }, branch: { id: branchId } }
-            });
+        const { items, ...headerData } = dto;
+        this.purchaseRepo.merge(purchase, headerData);
+        const savedPurchase = await this.purchaseRepo.save(purchase);
 
-            if (stockRecord) {
-                stockRecord.quantity = Number(stockRecord.quantity) + Number(itemDto.quantity);
-                await queryRunner.manager.save(stockRecord);
-            } else {
-                const newStock = new Stock();
-                newStock.product = { id: itemDto.product_id } as any;
-                newStock.branch = { id: branchId } as any;
-                newStock.quantity = Number(itemDto.quantity);
-                newStock.tenant = { id: tenantId } as any;
-                await queryRunner.manager.save(newStock);
-            }
-
-            // Actualizar Costo y Precio Venta
-            const product = await queryRunner.manager.findOne(Product, { where: { id: itemDto.product_id } });
-            if (product) {
-                product.cost_price = itemDto.cost;
-                if (product.profit_margin && product.vat_rate) {
-                    // ... Recalculo precio ...
-                    const margin = Number(product.profit_margin) / 100;
-                    const vat = Number(product.vat_rate) / 100;
-                    const netPrice = Number(itemDto.cost) * (1 + margin);
-                    product.sale_price = netPrice * (1 + vat);
-                }
-                await queryRunner.manager.save(product);
+        if (items) {
+            await this.detailRepo.delete({ purchase: { id: id } });
+            if (items.length > 0) {
+                const newDetails = items.map(item => {
+                    return this.detailRepo.create({
+                        purchase: savedPurchase,
+                        product: { id: item.product_id },
+                        quantity: item.quantity,
+                        cost: item.cost,
+                        profit_margin: item.profit_margin || 0,
+                        vat_rate: item.vat_rate || 0,
+                        sale_price: item.sale_price || 0
+                    });
+                });
+                await this.detailRepo.save(newDetails);
             }
         }
 
-        // B. GENERAR DEUDA (Cta Cte)
-        // Necesitamos inyectar AccountService o usarlo si ya está inyectado
-        await this.accountService.addMovement({
-            date: purchase.date,
-            type: MovementType.DEBIT,
-            concept: MovementConcept.PURCHASE,
-            amount: purchase.total,
-            description: `Compra Fac. ${purchase.invoice_number || 'S/N'}`,
-            provider: { id: purchase.provider.id } as any, // Asegúrate de tener provider cargado
-        }, tenantId);
+        if (dto.status === PurchaseStatus.RECEIVED && purchase.status !== PurchaseStatus.RECEIVED) {
+            const fresh = await this.findOne(id, tenantId);
+            await this.impactStockAndCosts(fresh, tenantId);
+        }
+
+        return this.findOne(id, tenantId);
     }
 
-    async findAll(
-        page: number,
-        limit: number,
-        tenantId: string,
-        filters: {
-            providerId?: string;
-            startDate?: string;
-            endDate?: string;
-            sortBy?: string;
-            sortOrder?: 'ASC' | 'DESC';
-            status?: string;
-        }
-    ) {
+    // --- FIND ONE ---
+    async findOne(id: string, tenantId: string) {
+        const purchase = await this.purchaseRepo.findOne({
+            where: { id, tenant: { id: tenantId } },
+            relations: ['details', 'details.product', 'provider', 'branch']
+        });
+        if (!purchase) throw new NotFoundException('Compra no encontrada');
+        return purchase;
+    }
+
+    // --- FIND ALL (Agregado para que no de error el controller) ---
+    async findAll(page: number, limit: number, filters: any, tenantId: string) {
         const query = this.purchaseRepo.createQueryBuilder('purchase')
             .leftJoinAndSelect('purchase.provider', 'provider')
             .leftJoinAndSelect('purchase.branch', 'branch')
-            .leftJoinAndSelect('purchase.items', 'items')
-            .leftJoinAndSelect('items.product', 'product')
             .where('purchase.tenant_id = :tenantId', { tenantId });
 
-        // 1. Filtro por Proveedor
-        if (filters.providerId) {
-            query.andWhere('purchase.provider_id = :providerId', { providerId: filters.providerId });
-        }
+        if (filters.provider_id) query.andWhere('purchase.provider_id = :pid', { pid: filters.provider_id });
+        if (filters.status) query.andWhere('purchase.status = :status', { status: filters.status });
 
-        if (filters.status) {
-            query.andWhere('purchase.status = :status', { status: filters.status });
-        }
-
-        // 2. Filtro por Fechas (Rango)
-        if (filters.startDate) {
-            query.andWhere('purchase.date >= :startDate', { startDate: filters.startDate });
-        }
-        if (filters.endDate) {
-            // Ajustamos para que incluya todo el día final (hasta las 23:59:59)
-            const end = new Date(filters.endDate);
-            end.setHours(23, 59, 59, 999);
-            query.andWhere('purchase.date <= :endDate', { endDate: end });
-        }
-
-        // 3. Ordenamiento Dinámico
-        const sortColumn = filters.sortBy || 'date'; // Por defecto fecha
-        const sortOrder = filters.sortOrder || 'DESC'; // Por defecto lo más nuevo
-
-        // Mapeamos nombres de frontend a columnas reales
-        const sortMap = {
-            'date': 'purchase.date',
-            'total': 'purchase.total',
-            'provider': 'provider.name',
-            'invoice': 'purchase.invoice_number'
-        };
-
-        query.orderBy(sortMap[sortColumn] || 'purchase.date', sortOrder);
-        // Desempate siempre por creación
-        query.addOrderBy('purchase.created_at', 'DESC');
-
-        // Paginación
-        query.skip((page - 1) * limit).take(limit);
+        query.orderBy('purchase.date', 'DESC')
+            .skip((page - 1) * limit)
+            .take(limit);
 
         const [data, total] = await query.getManyAndCount();
-
         return { data, total };
+    }
+
+    // --- LÓGICA DE IMPACTO ---
+private async impactStockAndCosts(purchase: Purchase, tenantId: string) {
+        console.log(`🔎 Buscando Configuración para Tenant ID: "${tenantId}"`);
+
+        // 1. Buscamos la configuración de ESTA empresa
+        let setting = await this.settingsRepo.findOne({ 
+            where: { tenant: { id: tenantId } } 
+        });
+
+        // 🚑 FALLBACK DE EMERGENCIA (Solo para debug/desarrollo)
+        // Si no encuentra la config del tenant, agarra la primera que encuentre en la tabla
+        // para que no te explote el sistema con dólar a 1.
+        if (!setting) {
+            console.warn("⚠️ NO SE ENCONTRÓ CONFIGURACIÓN PARA ESTE TENANT. Buscando una genérica...");
+            const allSettings = await this.settingsRepo.find({ take: 1 });
+            if (allSettings.length > 0) {
+                setting = allSettings[0];
+                console.log("✅ Usando configuración genérica encontrada (ID):", setting.id);
+            }
+        }
+
+        // 2. Determinamos el valor del Dólar
+        // Tu entidad usa 'exchange_rate', así que priorizamos ese campo.
+        let globalDollar = 1;
+        
+        if (setting) {
+            // Convertimos a Number porque decimal viene como string desde la BD a veces
+            const rate = Number(setting.exchange_rate);
+            if (rate > 0) globalDollar = rate;
+        }
+
+        console.log(`💵 Dólar Global Efectivo: $${globalDollar}`);
+
+        if (globalDollar <= 1) {
+            console.error("⛔ ALERTA ROJA: El dólar es 1 o 0. Si guardas productos en USD, se romperán los precios.");
+        }
+
+        // 3. Datos de la Compra
+        const purchaseRate = Number(purchase.exchange_rate) || 1;
+        const purchaseCurrency = purchase.currency || 'ARS';
+
+        // Validación de seguridad por si TypeORM no trajo relaciones
+        if (!purchase.details || !Array.isArray(purchase.details)) {
+             console.warn("⚠️ La compra no tiene detalles cargados. Saltando impacto.");
+             return;
+        }
+
+        for (const detail of purchase.details) {
+            // A. SUMAR STOCK
+            await this.productsService.addStock(
+                detail.product.id,
+                Number(detail.quantity),
+                tenantId,
+                purchase.branch?.id
+            );
+
+            // B. ACTUALIZAR PRECIOS
+            const product = await this.productsService.findOne(detail.product.id);
+
+            if (product) {
+                const productCurrency = product.currency || 'ARS';
+                let newCost = Number(detail.cost); // Costo tal cual vino en la factura
+
+                console.log(`📦 ${product.name} | Base: ${productCurrency} | Fac: ${purchaseCurrency} $${newCost}`);
+
+                // --- LÓGICA DE CONVERSIÓN ---
+
+                // CASO 1: Factura ARS -> Producto USD (Ej: Taladro)
+                // Acción: DIVIDIR por la cotización GLOBAL.
+                if (purchaseCurrency === 'ARS' && productCurrency === 'USD') {
+                    if (globalDollar > 1) {
+                        newCost = newCost / globalDollar;
+                        console.log(`🔄 ARS->USD: ${detail.cost} / ${globalDollar} = ${newCost.toFixed(2)}`);
+                    } else {
+                        console.warn(`❌ No se convirtió ARS->USD porque el dólar es ${globalDollar}`);
+                    }
+                }
+                
+                // CASO 2: Factura USD -> Producto ARS (Ej: Cemento)
+                // Acción: MULTIPLICAR por la cotización DE LA FACTURA.
+                else if (purchaseCurrency === 'USD' && productCurrency === 'ARS') {
+                    newCost = newCost * purchaseRate;
+                    console.log(`🔄 USD->ARS: ${detail.cost} * ${purchaseRate} = ${newCost.toFixed(2)}`);
+                }
+
+                // --- CÁLCULO DE VENTA ---
+                const margin = Number(product.profit_margin) || 30;
+                const vat = Number(product.vat_rate) || 21;
+
+                const netPrice = newCost * (1 + margin / 100);
+                const newSalePrice = netPrice * (1 + vat / 100);
+
+                // Guardamos
+                await this.productsService.updateProductCosts(
+                    product.id,
+                    newCost,
+                    newSalePrice,
+                    tenantId
+                );
+            }
+        }
     }
 }
