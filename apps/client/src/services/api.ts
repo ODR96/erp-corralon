@@ -325,6 +325,15 @@ export const salesService = {
     restoreClient: async (id: string) => {
         await api.patch(`/sales/clients/${id}/restore`);
     },
+
+    create: async (data: any) => (await api.post('/sales', data)).data,
+    
+    getAll: async (type?: string) => { // type = 'PRESUPUESTO' | 'VENTA'
+        const response = await api.get('/sales', { params: { type } });
+        return response.data;
+    },
+    
+    getById: async (id: string) => (await api.get(`/sales/${id}`)).data,
 };
 
 export const settingsService = {
@@ -407,6 +416,22 @@ export const financeService = {
     createPayment: async (paymentData: any) => {
         const response = await api.post('/finance/payments', paymentData);
         return response.data;
+    },
+
+    cash: {
+        getStatus: async () => (await api.get('/finance/cash/status')).data,
+        open: async (data: { opening_balance: number; notes?: string }) => (await api.post('/finance/cash/open', data)).data,
+        close: async (data: { closing_balance: number; notes?: string }) => (await api.post('/finance/cash/close', data)).data,
+        getMovements: async () => (await api.get('/finance/cash/movements')).data,
+        addManualMovement: async (data: { type: 'IN' | 'OUT'; concept: string; amount: number; description: string }) => 
+            (await api.post('/finance/cash/movement', data)).data
+    },
+
+    expenses: {
+        getAll: async () => (await api.get('/finance/expenses')).data,
+        create: async (data: any) => (await api.post('/finance/expenses', data)).data,
+        getCategories: async () => (await api.get('/finance/expenses/categories')).data,
+        createCategory: async (data: any) => (await api.post('/finance/expenses/categories', data)).data
     },
 
     // Consultar deuda actual (si tienes el endpoint, sino lo dejamos para después)

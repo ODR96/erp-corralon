@@ -17,14 +17,14 @@ import { Save, Store, AttachMoney, Gavel } from "@mui/icons-material";
 import { useNotification } from "../context/NotificationContext";
 import { settingsService } from "../services/api";
 
-// 1. DEFINIMOS LOS TIPOS (Iguales a tu TenantConfig)
+// 1. DEFINIMOS LOS TIPOS (Agregamos printer_format)
 interface SettingsData {
-  fantasy_name: string; // Backend usa fantasy_name
+  fantasy_name: string;
   legal_name: string;
-  tax_id: string; // Backend usa tax_id
-  address: string; // Nuevo
-  phone: string; // Nuevo
-  email: string; // Nuevo
+  tax_id: string;
+  address: string;
+  phone: string;
+  email: string;
 
   currency: string;
   exchange_rate: number;
@@ -33,6 +33,7 @@ interface SettingsData {
 
   allow_negative_stock: boolean;
   price_rounding: number;
+  printer_format: string; // 👈 NUEVO CAMPO
 }
 
 export const SettingsPage = () => {
@@ -40,7 +41,7 @@ export const SettingsPage = () => {
   const [tab, setTab] = useState(0);
   const [loading, setLoading] = useState(false);
 
-  // 2. ESTADO INICIAL
+  // 2. ESTADO INICIAL (Agregamos printer_format default 'A4')
   const [formData, setFormData] = useState<SettingsData>({
     fantasy_name: "",
     legal_name: "",
@@ -54,6 +55,7 @@ export const SettingsPage = () => {
     default_profit_margin: 30,
     allow_negative_stock: false,
     price_rounding: 0,
+    printer_format: "A4", // 👈 Valor por defecto
   });
 
   useEffect(() => {
@@ -64,12 +66,11 @@ export const SettingsPage = () => {
     try {
       const data = await settingsService.get();
       if (data) {
-        // Mapeamos directo porque ahora los nombres coinciden
         setFormData({
           fantasy_name: data.fantasy_name || "",
           legal_name: data.legal_name || "",
           tax_id: data.tax_id || "",
-          address: data.address || "", // Si no existe en DB vieja, viene vacio
+          address: data.address || "",
           phone: data.phone || "",
           email: data.email || "",
           currency: data.currency || "ARS",
@@ -78,6 +79,7 @@ export const SettingsPage = () => {
           default_profit_margin: Number(data.default_profit_margin || 30),
           allow_negative_stock: data.allow_negative_stock || false,
           price_rounding: Number(data.price_rounding || 0),
+          printer_format: data.printer_format || "A4", // 👈 Cargamos del backend
         });
       }
     } catch (err) {
@@ -90,16 +92,14 @@ export const SettingsPage = () => {
     if (e) e.preventDefault();
     setLoading(true);
     try {
-      // ⚠️ CONVERSIÓN EXPLÍCITA DE DATOS ⚠️
-      // Aseguramos que los números viajen como números y no como texto
       const payload = {
         ...formData,
         exchange_rate: Number(formData.exchange_rate),
         default_vat_rate: Number(formData.default_vat_rate),
         default_profit_margin: Number(formData.default_profit_margin),
         price_rounding: Number(formData.price_rounding),
-        // Los booleanos y strings suelen viajar bien, pero por seguridad:
         allow_negative_stock: Boolean(formData.allow_negative_stock),
+        // printer_format viaja como string, no necesita conversión
       };
 
       await settingsService.update(payload);
@@ -131,24 +131,28 @@ export const SettingsPage = () => {
         >
           <Tab icon={<Store />} iconPosition="start" label="Empresa" />
           <Tab icon={<AttachMoney />} iconPosition="start" label="Finanzas" />
-          <Tab icon={<Gavel />} iconPosition="start" label="Reglas" />
+          <Tab
+            icon={<Gavel />}
+            iconPosition="start"
+            label="Reglas & Impresión"
+          />
         </Tabs>
 
         <form onSubmit={handleSave}>
           <Box p={4}>
-            {/* TAB 0: DATOS EMPRESA */}
+            {/* TAB 0: EMPRESA (Igual que antes) */}
             {tab === 0 && (
               <Grid container spacing={3}>
+                {/* ... Tus campos de empresa existentes ... */}
                 <Grid item xs={12}>
                   <Typography variant="subtitle2" color="text.secondary">
-                    Estos datos aparecerán en los reportes y PDF de Compras.
+                    Estos datos aparecerán en los reportes y PDF.
                   </Typography>
                 </Grid>
                 <Grid item xs={12} md={6}>
                   <TextField
                     fullWidth
                     label="Nombre de Fantasía"
-                    placeholder="Ej: Ferretería El Clavo"
                     value={formData.fantasy_name}
                     onChange={(e) =>
                       handleChange("fantasy_name", e.target.value)
@@ -183,7 +187,6 @@ export const SettingsPage = () => {
                   <TextField
                     fullWidth
                     label="Dirección Comercial"
-                    placeholder="Ej: Av. San Martín 1234, Formosa"
                     value={formData.address}
                     onChange={(e) => handleChange("address", e.target.value)}
                   />
@@ -199,7 +202,7 @@ export const SettingsPage = () => {
               </Grid>
             )}
 
-            {/* TAB 1: FINANZAS */}
+            {/* TAB 1: FINANZAS (Igual que antes) */}
             {tab === 1 && (
               <Grid container spacing={3}>
                 <Grid item xs={12} md={6}>
@@ -214,7 +217,6 @@ export const SettingsPage = () => {
                     <MenuItem value="USD">Dólar (USD)</MenuItem>
                   </TextField>
                 </Grid>
-
                 <Grid item xs={12} md={6}>
                   <TextField
                     fullWidth
@@ -231,8 +233,6 @@ export const SettingsPage = () => {
                     }}
                   />
                 </Grid>
-
-                {/* 👇 SELECTOR DE IVA QUE PEDISTE */}
                 <Grid item xs={12} md={6}>
                   <TextField
                     select
@@ -249,7 +249,6 @@ export const SettingsPage = () => {
                     <MenuItem value={27}>27%</MenuItem>
                   </TextField>
                 </Grid>
-
                 <Grid item xs={12} md={6}>
                   <TextField
                     fullWidth
@@ -264,9 +263,42 @@ export const SettingsPage = () => {
               </Grid>
             )}
 
-            {/* TAB 2: REGLAS */}
+            {/* TAB 2: REGLAS E IMPRESIÓN */}
             {tab === 2 && (
               <Grid container spacing={3}>
+                {/* 👇 NUEVO: SECCIÓN IMPRESIÓN */}
+                <Grid item xs={12}>
+                  <Typography variant="h6" color="primary">
+                    Opciones de Impresión
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Los presupuestos siempre se imprimirán en A4. Las ventas
+                    usarán esta configuración.
+                  </Typography>
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    select
+                    fullWidth
+                    label="Formato Ticket de Venta"
+                    value={formData.printer_format}
+                    onChange={(e) =>
+                      handleChange("printer_format", e.target.value)
+                    }
+                    helperText="Si elige 80mm, asegúrese de tener una impresora térmica."
+                  >
+                    <MenuItem value="A4">Hoja A4 (Estándar)</MenuItem>
+                    <MenuItem value="80mm">Ticket Térmico (80mm)</MenuItem>
+                  </TextField>
+                </Grid>
+
+                <Grid item xs={12}>
+                  <Typography variant="h6" color="primary" mt={2}>
+                    Reglas de Negocio
+                  </Typography>
+                </Grid>
+
                 <Grid item xs={12} md={6}>
                   <TextField
                     select
@@ -279,7 +311,6 @@ export const SettingsPage = () => {
                   >
                     <MenuItem value={0}>Exacto (Sin redondeo)</MenuItem>
                     <MenuItem value={1}>Redondear a $1</MenuItem>
-                    <MenuItem value={5}>Redondear a $5</MenuItem>
                     <MenuItem value={10}>Redondear a $10</MenuItem>
                     <MenuItem value={50}>Redondear a $50</MenuItem>
                     <MenuItem value={100}>Redondear a $100</MenuItem>

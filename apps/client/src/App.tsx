@@ -26,6 +26,8 @@ import { PurchasesPage } from "./pages/inventory/PurchasesPage";
 import { NewPaymentPage } from "./pages/finance/NewPaymentPage";
 import { TenantsPage } from "./pages/admin/TenantsPage";
 import { POSPage } from "./pages/sales/POSPage";
+import { CashPage } from "./pages/finance/CashPage";
+import { ExpensesPage } from "./pages/finance/ExpensesPage";
 
 // Si DashboardPage es muy simple, puedes dejarlo aquí o moverlo.
 const DashboardPlaceholder = () => (
@@ -85,6 +87,8 @@ function App() {
                 path="/inventory/purchases/:id"
                 element={<NewPurchasePage />}
               />
+              <Route path="/finance/cash" element={<CashPage />} />
+              <Route path="/finance/expenses" element={<ExpensesPage />} />
             </Route>
           </Route>
 

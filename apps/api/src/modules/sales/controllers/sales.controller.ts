@@ -19,11 +19,10 @@ export class SalesController {
 
     @Get()
     @RequirePermissions('sales.view')
-    findAll(@Request() req: any) {
-        // Si es Vendedor, solo ve ventas de SU sucursal (puedes ajustar esta lógica)
-        // Si es Admin, puede ver todas (o pasar ?branch_id=...)
+    findAll(@Request() req: any, @Query('type') type?: string) {
+
         const branchId = req.user.branchId;
-        return this.salesService.findAll(req.user.tenantId, branchId);
+        return this.salesService.findAll(req.user.tenantId, branchId, type);
     }
 
     @Get(':id')

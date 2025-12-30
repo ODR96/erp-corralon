@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { useNavigate } from "react-router-dom"; // 👈 Importar hook de navegación
 import {
   Box,
   Grid,
@@ -13,8 +14,6 @@ import {
   Divider,
   List,
   ListItem,
-  ListItemText,
-  ListItemSecondaryAction,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -25,6 +24,16 @@ import {
   InputLabel,
   InputAdornment,
   Chip,
+  Autocomplete,
+  CircularProgress,
+  Tooltip,
+  Switch,
+  FormControlLabel,
+  Table,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableBody,
 } from "@mui/material";
 import {
   Search,
@@ -35,11 +44,22 @@ import {
   AttachMoney,
   QrCode,
   CreditCard,
+  ReceiptLong,
+  PersonAdd,
+  Description,
+  Print,
+  CheckCircle,
+  Restore,
+  Visibility,
+  ArrowBack,
+  Close,
 } from "@mui/icons-material";
 import { useNotification } from "../../context/NotificationContext";
 import { api } from "../../services/api";
+// 👇 Importamos las nuevas funciones del generador
+import { generateSalePDF, getPdfUrl } from "../../utils/salePdfGenerator";
 
-// --- TIPOS ---
+// ... (Interfaces iguales que antes) ...
 interface Product {
   id: string;
   name: string;
@@ -47,144 +67,141 @@ interface Product {
   stock: number;
   category?: string;
 }
-
 interface CartItem extends Product {
   quantity: number;
   subtotal: number;
 }
-
-// --- DATOS MOCK (BORRAR LUEGO) ---
-const mockProducts: Product[] = [
-  {
-    id: "1",
-    name: "Martillo Galponero",
-    price: 15000,
-    stock: 10,
-    category: "Herramientas",
-  },
-  {
-    id: "2",
-    name: 'Clavos Punta Paris 2"',
-    price: 4500,
-    stock: 50,
-    category: "Ferretería",
-  },
-  {
-    id: "3",
-    name: "Pintura Latex 20L",
-    price: 85000,
-    stock: 5,
-    category: "Pinturas",
-  },
-  {
-    id: "4",
-    name: "Destornillador Phillips",
-    price: 3200,
-    stock: 0,
-    category: "Herramientas",
-  }, // Sin stock
-  {
-    id: "5",
-    name: "Cinta Métrica 5m",
-    price: 6500,
-    stock: 20,
-    category: "Medición",
-  },
-];
+interface Client {
+  id: string;
+  name: string;
+  tax_id: string;
+}
+interface Sale {
+  id: string;
+  created_at: string;
+  customer_name: string;
+  total: number;
+  invoice_number: string;
+}
 
 export const POSPage = () => {
+  const navigate = useNavigate(); // 👈 Hook para salir
   const { showNotification } = useNotification();
 
-  // Estados
-  const [products, setProducts] = useState<Product[]>([]); // Aquí irán los de la API
+  // --- ESTADOS ---
+  const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [saleType, setSaleType] = useState<"VENTA" | "PRESUPUESTO">("VENTA");
+  const [settings, setSettings] = useState<any>({});
 
-  // Estado del Pago
+  // Cliente
+  const [clientInputValue, setClientInputValue] = useState("");
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [loadingClients, setLoadingClients] = useState(false);
+
+  // Modals
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [newClientModalOpen, setNewClientModalOpen] = useState(false);
+  const [budgetsModalOpen, setBudgetsModalOpen] = useState(false);
+  const [successModalOpen, setSuccessModalOpen] = useState(false);
+
+  // 👇 NUEVO: Modal de Vista Previa de Impresión
+  const [printPreviewOpen, setPrintPreviewOpen] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null); // Referencia para imprimir directo
+
+  // Datos Pagos
   const [paymentMethod, setPaymentMethod] = useState("EFECTIVO");
   const [paymentReference, setPaymentReference] = useState("");
+  const [installments, setInstallments] = useState(1);
+  const [interestPercent, setInterestPercent] = useState(0);
 
-  // Cargar productos (Simulado por ahora)
+  // Datos Temporales
+  const [lastSaleData, setLastSaleData] = useState<any>(null);
+  const [budgetsList, setBudgetsList] = useState<Sale[]>([]);
+  const [newClientData, setNewClientData] = useState({
+    name: "",
+    tax_id: "",
+    phone: "",
+    address: "",
+  });
+
+  // 1. CARGA INICIAL
   useEffect(() => {
-    const fetchProducts = async () => {
+    const initData = async () => {
       try {
-        // 1. Pedimos un límite alto (1000) para tener todo el catálogo en el POS
-        const res = await api.get("/inventory/products?limit=1000");
-        console.log("🔥 DATA DEL BACKEND:", res.data.data || res.data);
-
-        // 2. DETECTIVE DE ESTRUCTURA 🕵️‍♂️
-        // Si el backend devuelve paginación, la lista está en res.data.data
-        // Si devuelve array directo (backup), está en res.data
-        const productsRaw = Array.isArray(res.data) ? res.data : res.data.data;
-
-        // Validación extra por si acaso
-        if (!Array.isArray(productsRaw)) {
-          console.error("Formato inesperado de productos:", res.data);
-          return;
+        const [resProd, resSettings] = await Promise.all([
+          api.get("/inventory/products?limit=1000"),
+          api.get("/settings"),
+        ]);
+        const productsRaw = Array.isArray(resProd.data)
+          ? resProd.data
+          : resProd.data.data;
+        if (Array.isArray(productsRaw)) {
+          setProducts(
+            productsRaw.map((p: any) => ({
+              id: p.id,
+              name: p.name,
+              price: Number(p.sale_price) || 0,
+              stock: Number(p.total_stock) || 0,
+              category: p.category?.name || "General",
+            }))
+          );
         }
-
-        // 3. Mapeo seguro
-        const mappedProducts = productsRaw.map((p: any) => ({
-          id: p.id,
-          name: p.name,
-
-          // 1. PRECIO: Priorizamos 'sale_price' que viene en tu JSON
-          price: Number(p.sale_price) || Number(p.price) || 0,
-
-          // 2. STOCK: Usamos 'total_stock' que es el que vale 10
-          stock: Number(p.total_stock) || 0,
-
-          category: p.category?.name || "General",
-        }));
-
-        setProducts(mappedProducts);
+        setSettings(resSettings.data || {});
       } catch (error) {
-        console.error(error);
-        showNotification("Error cargando productos", "error");
+        showNotification("Error cargando datos", "error");
       }
     };
-
-    fetchProducts();
+    initData();
   }, []);
 
-  // Filtrado de productos (Buscador)
-  const filteredProducts = useMemo(() => {
-    return products.filter((p) =>
-      p.name.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  }, [products, searchTerm]);
+  // 2. BUSCAR CLIENTES
+  useEffect(() => {
+    if (clientInputValue.length < 2) return;
+    const timeoutId = setTimeout(async () => {
+      setLoadingClients(true);
+      try {
+        const res = await api.get(`/sales/clients?search=${clientInputValue}`);
+        setClients(res.data.data || []);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setLoadingClients(false);
+      }
+    }, 500);
+    return () => clearTimeout(timeoutId);
+  }, [clientInputValue]);
 
-  // --- LÓGICA DEL CARRITO ---
-
-  const addToCart = (product: Product) => {
-    if (product.stock <= 0) {
-      showNotification("¡Sin stock disponible!", "error");
+  // --- LOGICA CARRITO (Igual que antes) ---
+  const addToCart = (product: Product, qty: number = 1) => {
+    if (saleType === "VENTA" && product.stock <= 0) {
+      showNotification("¡Sin stock!", "error");
       return;
     }
-
     setCart((prev) => {
       const existing = prev.find((item) => item.id === product.id);
-
       if (existing) {
-        // Si ya existe, validamos que no supere el stock
-        if (existing.quantity >= product.stock) {
-          showNotification("Stock máximo alcanzado", "warning");
+        if (saleType === "VENTA" && existing.quantity + qty > product.stock) {
+          showNotification("Tope stock", "warning");
           return prev;
         }
         return prev.map((item) =>
           item.id === product.id
             ? {
                 ...item,
-                quantity: item.quantity + 1,
-                subtotal: (item.quantity + 1) * item.price,
+                quantity: item.quantity + qty,
+                subtotal: (item.quantity + qty) * item.price,
               }
             : item
         );
-      } else {
-        // Nuevo item
-        return [...prev, { ...product, quantity: 1, subtotal: product.price }];
       }
+      return [
+        ...prev,
+        { ...product, quantity: qty, subtotal: qty * product.price },
+      ];
     });
   };
 
@@ -193,9 +210,9 @@ export const POSPage = () => {
       prev.map((item) => {
         if (item.id === id) {
           const newQty = item.quantity + delta;
-          if (newQty < 1) return item; // Mínimo 1
-          if (newQty > item.stock) {
-            showNotification("No hay más stock", "warning");
+          if (newQty < 1) return item;
+          if (saleType === "VENTA" && newQty > item.stock) {
+            showNotification("Tope stock", "warning");
             return item;
           }
           return { ...item, quantity: newQty, subtotal: newQty * item.price };
@@ -205,55 +222,179 @@ export const POSPage = () => {
     );
   };
 
-  const removeFromCart = (id: string) => {
-    setCart((prev) => prev.filter((item) => item.id !== id));
-  };
-
-  const total = useMemo(
+  const subtotal = useMemo(
     () => cart.reduce((acc, item) => acc + item.subtotal, 0),
     [cart]
   );
+  const interestAmount = useMemo(
+    () =>
+      paymentMethod === "CREDITO" && interestPercent > 0
+        ? (subtotal * interestPercent) / 100
+        : 0,
+    [subtotal, paymentMethod, interestPercent]
+  );
+  const total = subtotal + interestAmount;
 
-  // --- PROCESAR VENTA ---
-
-  const handleCheckout = async () => {
-    if (cart.length === 0) return;
-
-    // Armamos el DTO para el backend
-    const salePayload = {
-      type: "VENTA",
-      payment_method: paymentMethod,
-      payment_reference: paymentReference, // Para MP o Cheques
-      items: cart.map((item) => ({
-        product_id: item.id,
-        quantity: item.quantity,
-      })),
-    };
-
-    console.log("Enviando al backend:", salePayload);
-
+  // --- CLIENTE & PRESUPUESTOS ---
+  const handleCreateClient = async () => {
+    /* ... Código igual al anterior ... */
+    // (Si lo necesitas completo dímelo, resumo para no hacer el código infinito)
     try {
-      await api.post("/sales", salePayload);
-      showNotification(`Venta registrada! Total: $${total}`, "success");
-      setCart([]); // Limpiar carrito
-      setPaymentModalOpen(false);
-      // Aquí podrías recargar productos para actualizar stock visual
-    } catch (error) {
-      console.error(error);
-      showNotification("Error al procesar la venta", "error");
+      const res = await api.post("/sales/clients", newClientData);
+      setSelectedClient(res.data);
+      setClientInputValue(res.data.name);
+      setClients([res.data]);
+      setNewClientModalOpen(false);
+      showNotification("Cliente creado", "success");
+    } catch (e) {
+      showNotification("Error", "error");
     }
   };
 
+  const handleOpenBudgets = async () => {
+    try {
+      const res = await api.get("/sales?type=PRESUPUESTO");
+      setBudgetsList(Array.isArray(res.data) ? res.data : res.data.data || []);
+      setBudgetsModalOpen(true);
+    } catch (e) {
+      showNotification("Error al cargar presupuestos", "error");
+    }
+  };
+
+  const handleLoadBudget = async (saleId: string) => {
+    try {
+      const res = await api.get(`/sales/${saleId}`);
+      const budget = res.data;
+      const newCart: CartItem[] = [];
+      for (const detail of budget.details) {
+        const product = products.find((p) => p.id === detail.product.id);
+        if (product)
+          newCart.push({
+            ...product,
+            quantity: detail.quantity,
+            subtotal: detail.quantity * product.price,
+          });
+      }
+      setCart(newCart);
+      if (budget.customer_name) setClientInputValue(budget.customer_name);
+      setBudgetsModalOpen(false);
+      setSaleType("VENTA");
+      showNotification("Presupuesto cargado", "success");
+    } catch (e) {
+      showNotification("Error", "error");
+    }
+  };
+
+  const handleGoToClientProfile = () => {
+    if (selectedClient) {
+      // Navegamos al perfil del cliente (Asumiendo que esta ruta existirá)
+      // Puedes abrir en nueva pestaña para no perder la venta:
+      window.open(`/sales/clients/${selectedClient.id}`, "_blank");
+    }
+  };
+
+  // --- CHECKOUT ---
+  const handleCheckout = async () => {
+    if (cart.length === 0) return;
+    if (paymentMethod === "CUENTA_CORRIENTE" && !selectedClient) {
+      showNotification(
+        "Cuenta Corriente requiere cliente registrado.",
+        "error"
+      );
+      return;
+    }
+
+    const finalCustomerName = selectedClient
+      ? selectedClient.name
+      : clientInputValue || "Consumidor Final";
+    const finalTaxId = selectedClient ? selectedClient.tax_id : null;
+
+    const payload = {
+      type: saleType,
+      payment_method: paymentMethod,
+      payment_reference: paymentReference,
+      installments: paymentMethod === "CREDITO" ? installments : 1,
+      interest_amount: interestAmount,
+      customer_name: finalCustomerName,
+      customer_tax_id: finalTaxId,
+      items: cart.map((i) => ({ product_id: i.id, quantity: i.quantity })),
+    };
+
+    try {
+      const res = await api.post("/sales", payload);
+      setLastSaleData({
+        ...res.data,
+        type: saleType,
+        customer_name: finalCustomerName,
+        customer_tax_id: finalTaxId,
+        installments: payload.installments,
+        interest_amount: payload.interest_amount,
+        total: res.data.total || total,
+        items: [...cart],
+      });
+
+      setCart([]);
+      setPaymentModalOpen(false);
+      setSuccessModalOpen(true);
+      setClientInputValue("");
+      setSelectedClient(null);
+      setPaymentMethod("EFECTIVO");
+      setInstallments(1);
+      setInterestPercent(0);
+    } catch (error: any) {
+      showNotification(error.response?.data?.message || "Error", "error");
+    }
+  };
+
+  // --- LÓGICA DE IMPRESIÓN / VISTA PREVIA ---
+  const handleOpenPreview = (overrideFormat?: "A4" | "80mm") => {
+    if (!lastSaleData) return;
+    const printSettings = overrideFormat
+      ? { ...settings, printer_format: overrideFormat }
+      : settings;
+
+    // 1. Generamos el DOC (Sin guardar)
+    const doc = generateSalePDF(
+      lastSaleData,
+      lastSaleData.items,
+      printSettings
+    );
+
+    // 2. Obtenemos URL Blob
+    const url = getPdfUrl(doc);
+    setPdfBlobUrl(url);
+
+    // 3. Abrimos Modal de Preview
+    setPrintPreviewOpen(true);
+    setSuccessModalOpen(false); // Cerramos el de éxito
+  };
+
+  const handlePrintFromIframe = () => {
+    // Intentamos forzar la impresión del iframe
+    if (iframeRef.current && iframeRef.current.contentWindow) {
+      iframeRef.current.contentWindow.print();
+    }
+  };
+
+  const filteredProducts = products.filter((p) =>
+    p.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <Box sx={{ height: "calc(100vh - 100px)", display: "flex", gap: 2, p: 2 }}>
-      {/* SECCIÓN IZQUIERDA: BUSCADOR Y PRODUCTOS */}
+      {/* IZQUIERDA: PRODUCTOS */}
       <Box sx={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
-        {/* Buscador */}
-        <Paper sx={{ p: 2 }}>
+        <Paper sx={{ p: 2, display: "flex", gap: 2, alignItems: "center" }}>
+          {/* 👇 BOTÓN SALIR / VOLVER */}
+          <Tooltip title="Salir al Dashboard">
+            <IconButton onClick={() => navigate("/")} sx={{ mr: 1 }}>
+              <ArrowBack />
+            </IconButton>
+          </Tooltip>
+
           <TextField
             fullWidth
-            variant="outlined"
-            placeholder="Buscar por nombre, código o escanear..."
+            placeholder="Buscar producto..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             InputProps={{
@@ -265,29 +406,58 @@ export const POSPage = () => {
             }}
             autoFocus
           />
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={saleType === "PRESUPUESTO"}
+                onChange={(e) =>
+                  setSaleType(e.target.checked ? "PRESUPUESTO" : "VENTA")
+                }
+              />
+            }
+            label={saleType === "PRESUPUESTO" ? "PRESUPUESTO" : "VENTA"}
+            sx={{
+              bgcolor:
+                saleType === "PRESUPUESTO" ? "warning.light" : "transparent",
+              px: 2,
+              borderRadius: 1,
+            }}
+          />
+          <Tooltip title="Recuperar Presupuesto">
+            <IconButton
+              color="primary"
+              onClick={handleOpenBudgets}
+              sx={{ border: "1px solid", borderColor: "primary.main" }}
+            >
+              <Restore />
+            </IconButton>
+          </Tooltip>
         </Paper>
 
-        {/* Grilla de Productos */}
         <Box sx={{ flex: 1, overflowY: "auto" }}>
           <Grid container spacing={2}>
-            {filteredProducts.map((product) => (
-              <Grid item xs={12} sm={6} md={4} lg={3} key={product.id}>
+            {filteredProducts.map((p) => (
+              <Grid item xs={12} sm={6} md={4} lg={3} key={p.id}>
                 <Card
                   sx={{
-                    opacity: product.stock === 0 ? 0.6 : 1,
-                    bgcolor: product.stock === 0 ? "#f5f5f5" : "white",
+                    opacity: saleType === "VENTA" && p.stock <= 0 ? 0.6 : 1,
+                    bgcolor:
+                      saleType === "VENTA" && p.stock <= 0
+                        ? "#f5f5f5"
+                        : "white",
                   }}
                 >
                   <CardActionArea
-                    onClick={() => addToCart(product)}
-                    disabled={product.stock === 0}
+                    onClick={() => addToCart(p)}
+                    disabled={saleType === "VENTA" && p.stock <= 0}
                   >
                     <CardContent>
-                      <Typography variant="h6" noWrap title={product.name}>
-                        {product.name}
+                      <Typography variant="h6" noWrap>
+                        {p.name}
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
-                        Stock: {product.stock}
+                        Stock: {p.stock}
                       </Typography>
                       <Typography
                         variant="h5"
@@ -295,15 +465,10 @@ export const POSPage = () => {
                         fontWeight="bold"
                         mt={1}
                       >
-                        ${product.price.toLocaleString()}
+                        ${p.price.toLocaleString()}
                       </Typography>
-                      {product.stock === 0 && (
-                        <Chip
-                          label="AGOTADO"
-                          color="error"
-                          size="small"
-                          sx={{ mt: 1 }}
-                        />
+                      {saleType === "VENTA" && p.stock <= 0 && (
+                        <Chip label="AGOTADO" color="error" size="small" />
                       )}
                     </CardContent>
                   </CardActionArea>
@@ -314,17 +479,12 @@ export const POSPage = () => {
         </Box>
       </Box>
 
-      {/* SECCIÓN DERECHA: TICKET / CARRITO */}
+      {/* DERECHA: TICKET */}
       <Paper
-        sx={{
-          width: 400,
-          display: "flex",
-          flexDirection: "column",
-          p: 2,
-          bgcolor: "#fff",
-        }}
+        sx={{ width: 400, display: "flex", flexDirection: "column", p: 2 }}
         elevation={3}
       >
+        {/* ... (Sección Ticket Igual) ... */}
         <Typography
           variant="h5"
           fontWeight="bold"
@@ -333,25 +493,11 @@ export const POSPage = () => {
           alignItems="center"
           gap={1}
         >
-          <ShoppingCart /> Nueva Venta
+          {saleType === "VENTA" ? <ShoppingCart /> : <Description />}{" "}
+          {saleType === "VENTA" ? "Ticket Venta" : "Presupuesto"}
         </Typography>
-
         <Divider />
-
-        {/* Lista de Items */}
         <List sx={{ flex: 1, overflowY: "auto" }}>
-          {cart.length === 0 && (
-            <Typography
-              variant="body1"
-              color="text.secondary"
-              align="center"
-              mt={4}
-            >
-              El carrito está vacío.
-              <br />
-              Escanea o selecciona productos.
-            </Typography>
-          )}
           {cart.map((item) => (
             <ListItem key={item.id} divider sx={{ px: 0 }}>
               <Box width="100%">
@@ -363,12 +509,7 @@ export const POSPage = () => {
                     ${(item.price * item.quantity).toLocaleString()}
                   </Typography>
                 </Box>
-                <Box
-                  display="flex"
-                  justifyContent="space-between"
-                  alignItems="center"
-                  mt={1}
-                >
+                <Box display="flex" justifyContent="space-between" mt={1}>
                   <Box display="flex" alignItems="center" gap={1}>
                     <IconButton
                       size="small"
@@ -376,7 +517,7 @@ export const POSPage = () => {
                     >
                       <Remove fontSize="small" />
                     </IconButton>
-                    <Typography fontWeight="bold">{item.quantity}</Typography>
+                    <Typography>{item.quantity}</Typography>
                     <IconButton
                       size="small"
                       onClick={() => updateQuantity(item.id, 1)}
@@ -387,7 +528,9 @@ export const POSPage = () => {
                   <IconButton
                     color="error"
                     size="small"
-                    onClick={() => removeFromCart(item.id)}
+                    onClick={() =>
+                      setCart((prev) => prev.filter((i) => i.id !== item.id))
+                    }
                   >
                     <Delete fontSize="small" />
                   </IconButton>
@@ -396,15 +539,17 @@ export const POSPage = () => {
             </ListItem>
           ))}
         </List>
-
-        <Divider sx={{ my: 2 }} />
-
-        {/* Totales */}
         <Box mb={2}>
-          <Box display="flex" justifyContent="space-between" mb={1}>
-            <Typography>Subtotal</Typography>
-            <Typography>${total.toLocaleString()}</Typography>
-          </Box>
+          {interestAmount > 0 && (
+            <Box
+              display="flex"
+              justifyContent="space-between"
+              color="error.main"
+            >
+              <Typography>Recargo</Typography>
+              <Typography>+${interestAmount.toLocaleString()}</Typography>
+            </Box>
+          )}
           <Box display="flex" justifyContent="space-between">
             <Typography variant="h4" fontWeight="bold">
               Total
@@ -414,82 +559,175 @@ export const POSPage = () => {
             </Typography>
           </Box>
         </Box>
-
         <Button
           variant="contained"
           size="large"
           fullWidth
           disabled={cart.length === 0}
           onClick={() => setPaymentModalOpen(true)}
+          color={saleType === "PRESUPUESTO" ? "warning" : "primary"}
           sx={{ py: 1.5, fontSize: "1.2rem" }}
         >
-          COBRAR
+          {saleType === "PRESUPUESTO" ? "GENERAR PRESUPUESTO" : "COBRAR"}
         </Button>
       </Paper>
 
-      {/* MODAL DE PAGO */}
+      {/* MODAL COBRO */}
       <Dialog
         open={paymentModalOpen}
         onClose={() => setPaymentModalOpen(false)}
         fullWidth
         maxWidth="xs"
       >
-        <DialogTitle>Finalizar Venta</DialogTitle>
+        <DialogTitle>
+          {saleType === "VENTA" ? "Finalizar Venta" : "Guardar Presupuesto"}
+        </DialogTitle>
         <DialogContent dividers>
           <Box textAlign="center" mb={3}>
-            <Typography variant="body2" color="text.secondary">
-              Total a Pagar
-            </Typography>
             <Typography variant="h3" fontWeight="bold" color="primary">
               ${total.toLocaleString()}
             </Typography>
           </Box>
 
-          <FormControl fullWidth margin="normal">
-            <InputLabel>Método de Pago</InputLabel>
-            <Select
-              value={paymentMethod}
-              label="Método de Pago"
-              onChange={(e) => setPaymentMethod(e.target.value)}
-            >
-              {/* 👇 Estos VALUE deben ser idénticos a los de tu Base de Datos */}
-              <MenuItem value="EFECTIVO">
-                <AttachMoney sx={{ mr: 1 }} /> Efectivo
-              </MenuItem>
-              <MenuItem value="TRANSFERENCIA">
-                <QrCode sx={{ mr: 1 }} /> Mercado Pago / QR
-              </MenuItem>
-              <MenuItem value="DEBITO">
-                <CreditCard sx={{ mr: 1 }} /> Débito
-              </MenuItem>
-              <MenuItem value="CREDITO">
-                <CreditCard sx={{ mr: 1 }} /> Crédito
-              </MenuItem>
-              <MenuItem value="CHEQUE">Cheque</MenuItem>
-              <MenuItem value="CUENTA_CORRIENTE">Cuenta Corriente</MenuItem>
-            </Select>
-          </FormControl>
-
-          {(paymentMethod === "TRANSFERENCIA" ||
-            paymentMethod === "CHEQUE") && (
-            <TextField
-              fullWidth
-              margin="normal"
-              label={
-                paymentMethod === "CHEQUE"
-                  ? "Número de Cheque"
-                  : "Nro Operación / Referencia"
+          <Box mb={2} display="flex" alignItems="flex-start" gap={1}>
+            <Autocomplete
+              freeSolo
+              sx={{ flex: 1 }}
+              options={clients}
+              loading={loadingClients}
+              getOptionLabel={(option) =>
+                typeof option === "string"
+                  ? option
+                  : `${option.name} (${option.tax_id || "S/DNI"})`
               }
-              value={paymentReference}
-              onChange={(e) => setPaymentReference(e.target.value)}
-              helperText="Opcional: Para conciliación"
+              onInputChange={(_, value) => setClientInputValue(value)}
+              onChange={(_, newValue) => {
+                if (typeof newValue !== "string") setSelectedClient(newValue);
+              }}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Cliente"
+                  placeholder="Consumidor Final"
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <>
+                        {loadingClients && <CircularProgress size={20} />}
+                        {params.InputProps.endAdornment}
+                      </>
+                    ),
+                  }}
+                />
+              )}
             />
+            <Tooltip title="Registrar Cliente">
+              <IconButton
+                color="secondary"
+                onClick={() => setNewClientModalOpen(true)}
+                sx={{ mt: 1, border: "1px solid" }}
+              >
+                <PersonAdd />
+              </IconButton>
+            </Tooltip>
+
+            {/* 👇 BOTÓN OJO (Visible si hay cliente seleccionado) */}
+            {selectedClient && (
+              <Tooltip title="Ver Perfil de Cliente">
+                <IconButton
+                  color="primary"
+                  onClick={handleGoToClientProfile}
+                  sx={{ mt: 1, border: "1px solid" }}
+                >
+                  <Visibility />
+                </IconButton>
+              </Tooltip>
+            )}
+          </Box>
+
+          {selectedClient && (
+            <Chip
+              label={`Registrado: ${selectedClient.name}`}
+              onDelete={() => setSelectedClient(null)}
+              color="success"
+              sx={{ mb: 2 }}
+            />
+          )}
+
+          {/* ... (Selectores de pago iguales) ... */}
+          {saleType === "VENTA" && (
+            <>
+              <FormControl fullWidth margin="normal">
+                <InputLabel>Método de Pago</InputLabel>
+                <Select
+                  value={paymentMethod}
+                  label="Método de Pago"
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                >
+                  <MenuItem value="EFECTIVO">
+                    <AttachMoney sx={{ mr: 1 }} /> Efectivo
+                  </MenuItem>
+                  <MenuItem value="DEBITO">
+                    <CreditCard sx={{ mr: 1 }} /> Débito
+                  </MenuItem>
+                  <MenuItem value="CREDITO">
+                    <CreditCard sx={{ mr: 1 }} /> Crédito (Cuotas)
+                  </MenuItem>
+                  <MenuItem value="TRANSFERENCIA">
+                    <QrCode sx={{ mr: 1 }} /> Transferencia / QR
+                  </MenuItem>
+                  <MenuItem value="CHEQUE">
+                    <ReceiptLong sx={{ mr: 1 }} /> Cheque
+                  </MenuItem>
+                  <MenuItem
+                    value="CUENTA_CORRIENTE"
+                    sx={{ color: "warning.main" }}
+                  >
+                    Cuenta Corriente
+                  </MenuItem>
+                </Select>
+              </FormControl>
+
+              {paymentMethod === "CREDITO" && (
+                <Grid container spacing={2} mt={0}>
+                  <Grid item xs={6}>
+                    <TextField
+                      label="Cuotas"
+                      type="number"
+                      value={installments}
+                      onChange={(e) => setInstallments(Number(e.target.value))}
+                      fullWidth
+                    />
+                  </Grid>
+                  <Grid item xs={6}>
+                    <TextField
+                      label="% Recargo"
+                      type="number"
+                      value={interestPercent}
+                      onChange={(e) =>
+                        setInterestPercent(Number(e.target.value))
+                      }
+                      fullWidth
+                      InputProps={{ endAdornment: "%" }}
+                    />
+                  </Grid>
+                </Grid>
+              )}
+              {(paymentMethod === "TRANSFERENCIA" ||
+                paymentMethod === "CHEQUE") && (
+                <TextField
+                  label="Referencia"
+                  fullWidth
+                  margin="normal"
+                  value={paymentReference}
+                  onChange={(e) => setPaymentReference(e.target.value)}
+                />
+              )}
+            </>
           )}
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setPaymentModalOpen(false)} color="inherit">
-            Cancelar
-          </Button>
+          <Button onClick={() => setPaymentModalOpen(false)}>Cancelar</Button>
           <Button
             onClick={handleCheckout}
             variant="contained"
@@ -497,7 +735,211 @@ export const POSPage = () => {
             size="large"
             fullWidth
           >
-            CONFIRMAR PAGO
+            CONFIRMAR
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* MODAL RECUPERAR PRESUPUESTO */}
+      <Dialog
+        open={budgetsModalOpen}
+        onClose={() => setBudgetsModalOpen(false)}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle>Recuperar Presupuesto</DialogTitle>
+        <DialogContent dividers>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Fecha</TableCell>
+                <TableCell>Cliente</TableCell>
+                <TableCell>Total</TableCell>
+                <TableCell align="right">Acción</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {budgetsList.map((b) => (
+                <TableRow key={b.id} hover>
+                  <TableCell>
+                    {new Date(b.created_at).toLocaleDateString()}
+                  </TableCell>
+                  <TableCell>{b.customer_name || "Anónimo"}</TableCell>
+                  <TableCell>${Number(b.total).toLocaleString()}</TableCell>
+                  <TableCell align="right">
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={() => handleLoadBudget(b.id)}
+                    >
+                      CARGAR
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {budgetsList.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={4} align="center">
+                    No hay presupuestos guardados
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBudgetsModalOpen(false)}>Cerrar</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* MODAL ÉXITO VENTA - SELECCIÓN DE ACCIÓN */}
+      <Dialog
+        open={successModalOpen}
+        onClose={() => setSuccessModalOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <Box p={3} textAlign="center">
+          <CheckCircle color="success" sx={{ fontSize: 60, mb: 2 }} />
+          <Typography variant="h5" fontWeight="bold">
+            ¡Operación Exitosa!
+          </Typography>
+          <Typography variant="body1" color="text.secondary" mb={3}>
+            #{lastSaleData?.invoice_number}
+          </Typography>
+
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <Button
+                variant="contained"
+                fullWidth
+                startIcon={<Print />}
+                onClick={() => handleOpenPreview()}
+                sx={{ py: 1.5 }}
+              >
+                VISTA PREVIA / IMPRIMIR
+              </Button>
+            </Grid>
+            {/* Botones rápidos específicos */}
+            <Grid item xs={6}>
+              <Button
+                variant="outlined"
+                size="small"
+                fullWidth
+                onClick={() => handleOpenPreview("80mm")}
+              >
+                Ticket 80mm
+              </Button>
+            </Grid>
+            <Grid item xs={6}>
+              <Button
+                variant="outlined"
+                size="small"
+                fullWidth
+                onClick={() => handleOpenPreview("A4")}
+              >
+                Hoja A4
+              </Button>
+            </Grid>
+
+            <Grid item xs={12}>
+              <Button
+                color="secondary"
+                fullWidth
+                onClick={() => setSuccessModalOpen(false)}
+              >
+                Nueva Venta
+              </Button>
+            </Grid>
+          </Grid>
+        </Box>
+      </Dialog>
+
+      {/* 👇 NUEVO: MODAL VISTA PREVIA PDF */}
+      <Dialog
+        open={printPreviewOpen}
+        onClose={() => setPrintPreviewOpen(false)}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          Vista Previa
+          <Box>
+            <Button
+              variant="contained"
+              startIcon={<Print />}
+              onClick={handlePrintFromIframe}
+              sx={{ mr: 1 }}
+            >
+              IMPRIMIR AHORA
+            </Button>
+            <IconButton onClick={() => setPrintPreviewOpen(false)}>
+              <Close />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 0, height: "500px" }}>
+          {pdfBlobUrl && (
+            <iframe
+              ref={iframeRef}
+              src={pdfBlobUrl}
+              title="Vista Previa PDF"
+              width="100%"
+              height="100%"
+              style={{ border: "none" }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL CLIENTE NUEVO (Igual que antes) */}
+      <Dialog
+        open={newClientModalOpen}
+        onClose={() => setNewClientModalOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Nuevo Cliente</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Nombre"
+            fullWidth
+            value={newClientData.name}
+            onChange={(e) =>
+              setNewClientData({ ...newClientData, name: e.target.value })
+            }
+          />
+          <TextField
+            margin="dense"
+            label="DNI/CUIT"
+            fullWidth
+            value={newClientData.tax_id}
+            onChange={(e) =>
+              setNewClientData({ ...newClientData, tax_id: e.target.value })
+            }
+          />
+          <TextField
+            margin="dense"
+            label="Teléfono"
+            fullWidth
+            value={newClientData.phone}
+            onChange={(e) =>
+              setNewClientData({ ...newClientData, phone: e.target.value })
+            }
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setNewClientModalOpen(false)}>Cancelar</Button>
+          <Button onClick={handleCreateClient} variant="contained">
+            Guardar
           </Button>
         </DialogActions>
       </Dialog>

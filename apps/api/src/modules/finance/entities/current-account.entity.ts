@@ -49,6 +49,9 @@ export class CurrentAccountMovement {
     @Column({ type: 'text', nullable: true })
     description: string; // Ej: "Factura A-0001" o "Pago parcial s/recibo X"
 
+    @Column({ nullable: true })
+    reference_id: string;
+
     // --- RELACIONES POLIMÓRFICAS (O es Cliente O es Proveedor) ---
 
     @ManyToOne(() => Client, { nullable: true })

@@ -50,6 +50,9 @@ export class TenantConfig {
     @Column('text', { nullable: true })
     email: string;
 
+    @Column('text', { default: 'A4' }) // Opciones: 'A4', '80mm'
+    printer_format: string;
+
     @UpdateDateColumn()
     updated_at: Date;
 }

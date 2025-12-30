@@ -36,6 +36,7 @@ import {
   ReceiptLong,
   Output,
   LocalShipping,
+  RemoveCircle,
 } from "@mui/icons-material";
 import { financeService } from "../../services/api";
 
@@ -125,6 +126,16 @@ export const MainLayout = () => {
       text: "Finanzas",
       icon: <AttachMoney />,
       children: [
+        {
+          text: "Caja / Tesorería", // 👈 NUEVO ITEM
+          path: "/finance/cash",
+          icon: <Store fontSize="small" />, // O el ícono que prefieras
+        },
+        {
+          text: "Gastos",
+          path: "/finance/expenses",
+          icon: <RemoveCircle fontSize="small" />, // Importar RemoveCircle de @mui/icons-material
+        },
         {
           text: "Nueva Orden Pago",
           path: "/finance/payments/new",

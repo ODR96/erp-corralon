@@ -1,28 +1,53 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { CreateSaleDto } from '../dto/create-sale.dto';
-import { Sale, SaleType } from '../entities/sale.entity';
+import { Sale, SaleType, PaymentMethod } from '../entities/sale.entity'; // Agregamos PaymentMethod
 import { SaleDetail } from '../entities/sale-detail.entity';
 import { Product } from '../../inventory/entities/product.entity';
-import { Stock } from '../../inventory/entities/stock.entity'; // Asegúrate de tener esta entidad
+import { Stock } from '../../inventory/entities/stock.entity';
+import { StockMovement, MovementType } from '../../inventory/entities/stock-movement.entity'; // Importar
+import { CurrentAccountMovement, MovementType as FinMovementType, MovementConcept } from '../../finance/entities/current-account.entity'; // Importar
+import { Client } from '../entities/client.entity'; // Necesitamos buscar al cliente
 import { User } from '../../users/entities/user.entity';
+import { CashService } from 'src/modules/finance/services/cash.service';
+import { TransactionType, TransactionConcept } from '../../finance/entities/cash-transaction.entity';
 
 @Injectable()
 export class SalesService {
-    constructor(private dataSource: DataSource) {}
+    constructor(private dataSource: DataSource,
+        private cashService: CashService
+    ) {}
 
-async create(dto: CreateSaleDto, tenantId: string, user: User) {
+    async create(dto: CreateSaleDto, tenantId: string, user: User) {
         
-        // 🛡️ VALIDACIÓN PREVIA: Si el usuario no tiene sucursal, no puede vender.
+        // 1. VALIDACIÓN: Si no hay sucursal, no se puede vender (no sabemos de dónde descontar)
         if (!user.branch) {
             throw new BadRequestException('El usuario no tiene una sucursal asignada para descontar stock.');
         }
 
         return this.dataSource.transaction(async (manager) => {
             
+            // --- A. VALIDACIÓN CLIENTE (Si es Cuenta Corriente) ---
+            let client: Client | null = null;
+            if (dto.payment_method === PaymentMethod.CURRENT_ACCOUNT) {
+                if (!dto.customer_tax_id) {
+                    throw new BadRequestException('Para vender en Cuenta Corriente, se requiere el CUIT/DNI del cliente.');
+                }
+                // Buscamos el cliente para asignarle la deuda
+                client = await manager.findOne(Client, { 
+                    where: { tax_id: dto.customer_tax_id, tenant: { id: tenantId } } 
+                });
+                
+                if (!client) {
+                    // Opcional: Podríamos crearlo automáticamente aquí, pero por seguridad mejor error.
+                    throw new NotFoundException(`Cliente con CUIT ${dto.customer_tax_id} no encontrado. Regístrelo antes de fiar.`);
+                }
+            }
+
             let totalAmount = 0;
             const detailsToSave: SaleDetail[] = [];
 
+            // --- B. PROCESAR ÍTEMS ---
             for (const item of dto.items) {
                 const product = await manager.findOne(Product, { 
                     where: { id: item.product_id, tenant: { id: tenantId } } 
@@ -30,17 +55,15 @@ async create(dto: CreateSaleDto, tenantId: string, user: User) {
 
                 if (!product) throw new NotFoundException(`Producto ${item.product_id} no encontrado`);
 
-                // 👇 SOLUCIÓN ERROR 1: Aseguramos que price existe (o usa sell_price si así lo llamaste)
                 const price = Number(product.sale_price); 
                 const name = product.name;
 
-                if (dto.type !== 'PRESUPUESTO') {
-                    // 👇 SOLUCIÓN ERROR 2: TypeScript ya sabe que user.branch existe por el if de arriba,
-                    // pero dentro de la transacción a veces pierde el contexto. Usamos "user.branch!.id" o "user.branch?.id"
-                    const stockRecord: Stock | null = await manager.findOne(Stock, {
+                // Solo descontamos stock si NO es un presupuesto
+                if (dto.type !== SaleType.PRESUPUESTO) {
+                    const stockRecord = await manager.findOne(Stock, {
                         where: { 
                             product: { id: product.id }, 
-                            branch: { id: user.branch?.id } // 👈 El signo de interrogación arregla el error
+                            branch: { id: user.branch?.id }
                         }
                     });
 
@@ -50,8 +73,22 @@ async create(dto: CreateSaleDto, tenantId: string, user: User) {
                         throw new BadRequestException(`Stock insuficiente para ${name}. Disponibles: ${stockRecord.quantity}`);
                     }
 
+                    // 1. Descontar Stock Físico
                     stockRecord.quantity = Number(stockRecord.quantity) - item.quantity;
                     await manager.save(stockRecord);
+
+                    // 2. Generar Movimiento de Stock (KARDEX) - ¡CRÍTICO PARA TRAZABILIDAD!
+                    const movement = manager.create(StockMovement, {
+                        type: MovementType.OUT, // Salida
+                        quantity: item.quantity,
+                        reason: `Venta`, // Se completará con el ID de venta al final si quieres, o "Venta Mostrador"
+                        product: product,
+                        branch: user.branch!, // Usamos la entidad completa si es posible
+                        tenant: { id: tenantId } as any,
+                        user: user,
+                        historical_cost: product.cost_price || 0 // Guardamos costo histórico
+                    });
+                    await manager.save(movement);
                 }
 
                 const subtotal = price * item.quantity;
@@ -67,24 +104,61 @@ async create(dto: CreateSaleDto, tenantId: string, user: User) {
                 detailsToSave.push(detail);
             }
 
+            // --- C. CREAR LA VENTA ---
             const sale = manager.create(Sale, {
                 tenant: { id: tenantId } as any,
-                branch: { id: user.branch?.id } as any, // 👈 Aquí también usamos ?.id
+                branch: { id: user.branch?.id } as any,
                 user: user,
                 type: dto.type || SaleType.VENTA, 
                 payment_method: dto.payment_method,
                 payment_reference: dto.payment_reference,
-                customer_name: dto.customer_name || 'Consumidor Final',
+                customer_name: client ? client.name : (dto.customer_name || 'Consumidor Final'),
                 customer_tax_id: dto.customer_tax_id,
                 total: totalAmount,
                 status: 'COMPLETED'
             });
 
-            const savedSale = await manager.save(sale) as Sale;
+            const savedSale = await manager.save(sale);
 
+            if (dto.payment_method === 'EFECTIVO') {
+                try {
+                    // OJO: Como estamos dentro de una transacción del dataSource, 
+                    // lo ideal sería que CashService soporte recibir el "manager" para ser atómico.
+                    // PERO, para no complicar tu CashService ahora, lo llamaremos "por fuera".
+                    // Si falla la caja, fallará la venta.
+                    
+                    await this.cashService.addTransaction({
+                        type: TransactionType.IN,
+                        concept: TransactionConcept.SALE,
+                        amount: totalAmount,
+                        description: `Venta #${savedSale.invoice_number}`
+                    }, user);
+                    
+                } catch (error) {
+                    // Si el error es "No hay caja abierta", queremos que la venta falle
+                    throw new BadRequestException('No se puede cobrar en EFECTIVO porque no tienes una CAJA ABIERTA.');
+                }
+            }
+
+            // Guardamos los detalles vinculados a la venta
             for (const detail of detailsToSave) {
                 detail.sale = savedSale;
                 await manager.save(detail);
+            }
+
+            // --- D. IMPACTO EN CUENTA CORRIENTE (Si aplica) ---
+            if (dto.type === SaleType.VENTA && dto.payment_method === PaymentMethod.CURRENT_ACCOUNT && client) {
+                const debtMovement = manager.create(CurrentAccountMovement, {
+                    tenant: { id: tenantId } as any,
+                    client: client,
+                    type: FinMovementType.DEBIT, // Aumenta la deuda del cliente
+                    concept: MovementConcept.SALE,
+                    amount: totalAmount,
+                    description: `Venta #${savedSale.invoice_number} (Fiado)`,
+                    date: new Date(),
+                    reference_id: savedSale.id
+                });
+                await manager.save(debtMovement);
             }
 
             return { 
@@ -96,16 +170,19 @@ async create(dto: CreateSaleDto, tenantId: string, user: User) {
         });
     }
 
-    // Historial de ventas (Simple)
-    async findAll(tenantId: string, branchId?: string) {
+    // ... (El resto de métodos findAll y findOne quedan igual)
+    async findAll(tenantId: string, branchId?: string, type?: string) {
         const query = this.dataSource.getRepository(Sale)
             .createQueryBuilder('sale')
-            .leftJoinAndSelect('sale.user', 'user') // Para saber quién vendió
+            .leftJoinAndSelect('sale.user', 'user')
+            .leftJoinAndSelect('sale.details', 'details')
             .where('sale.tenant_id = :tenantId', { tenantId })
             .orderBy('sale.created_at', 'DESC');
 
-        if (branchId) {
-            query.andWhere('sale.branch_id = :branchId', { branchId });
+        if (branchId) query.andWhere('sale.branch_id = :branchId', { branchId });
+
+        if (type) {
+            query.andWhere('sale.type = :type', { type });
         }
 
         return query.getMany();

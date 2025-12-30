@@ -9,10 +9,11 @@ import { Sale } from './entities/sale.entity';
 import { SaleDetail } from './entities/sale-detail.entity';
 import { Product } from '../inventory/entities/product.entity';
 import { Stock } from '../inventory/entities/stock.entity';
+import { FinanceModule } from '../finance/finance.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Client, Sale, SaleDetail, Product, Stock]) // 👈 ¡Muy importante! Registra la entidad
+    TypeOrmModule.forFeature([Client, Sale, SaleDetail, Product, Stock]), FinanceModule // 👈 ¡Muy importante! Registra la entidad
   ],
   controllers: [ClientsController, SalesController],
   providers: [ClientsService, SalesService],
