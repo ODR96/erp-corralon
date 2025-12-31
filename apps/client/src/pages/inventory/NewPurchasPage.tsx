@@ -321,9 +321,21 @@ export const NewPurchasePage = () => {
 
     setLoading(true);
     try {
+      // 1. Desestructuramos para separar lo que NO queremos enviar directo
+      // Sacamos 'provider' (para que no viaje el objeto)
+      // Sacamos 'invoice_number' (para validarlo)
+      const { provider, invoice_number, ...restHeader } = header;
+
       const payload = {
-        ...header,
-        provider_id: header.provider.id,
+        ...restHeader, // Aquí viaja date, currency, exchange_rate, etc.
+
+        // 2. Asignamos manualmente lo que sacamos
+        provider_id: provider.id,
+
+        // 3. Validación de cadena vacía para Postgres
+        // Si es "" (vacío), enviamos null. Si tiene texto, lo enviamos.
+        invoice_number: invoice_number === "" ? null : invoice_number,
+
         status: targetStatus,
         total: totals.total,
         items: items.map((i) => ({

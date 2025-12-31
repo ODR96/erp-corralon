@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Purchase, PurchaseStatus } from '../entities/purchase.entity';
@@ -6,21 +6,27 @@ import { PurchaseDetail } from '../entities/purchase-detail.entity';
 import { CreatePurchaseDto } from '../dto/create-purchase.dto';
 import { UpdatePurchaseDto } from '../dto/update-purchase.dto';
 import { ProductsService } from './products.service';
-// 👇 CORRECCIÓN 1: Usamos TenantConfig porque es lo que tienes en tu Module
 import { TenantConfig } from '../../tenants/entities/tenant-config.entity';
+import { CurrentAccountService } from '../../finance/services/current-account.service';
+import { MovementConcept, MovementType } from '../../finance/entities/current-account.entity';
 
 @Injectable()
 export class PurchasesService {
     constructor(
         @InjectRepository(Purchase) private purchaseRepo: Repository<Purchase>,
         @InjectRepository(PurchaseDetail) private detailRepo: Repository<PurchaseDetail>,
-        // 👇 CORRECCIÓN 2: Inyectamos TenantConfig (coincide con InventoryModule)
         @InjectRepository(TenantConfig) private settingsRepo: Repository<TenantConfig>,
         private readonly productsService: ProductsService,
+        private readonly currentAccountService: CurrentAccountService
     ) { }
 
     // --- CREAR ---
     async create(dto: CreatePurchaseDto, tenantId: string) {
+        // 1. RECOMENDACIÓN: Si la compra entra como RECIBIDA, la sucursal es OBLIGATORIA
+        if (dto.status === PurchaseStatus.RECEIVED && !dto.branch_id) {
+            throw new BadRequestException('Para ingresar una compra como RECIBIDA, debes seleccionar una Sucursal de destino.');
+        }
+
         const purchase = this.purchaseRepo.create({
             date: new Date(dto.date),
             invoice_number: dto.invoice_number,
@@ -53,10 +59,14 @@ export class PurchasesService {
 
         // 3. Impacto (si nace ya recibida)
         if (savedPurchase.status === PurchaseStatus.RECEIVED) {
-            // 👇 CORRECCIÓN CRÍTICA DEL ERROR "not iterable":
-            // Recargamos la compra completa para tener los 'details' antes de llamar a impactar
+            // Recargamos la entidad completa para tener los detalles y relaciones
             const fullPurchase = await this.findOne(savedPurchase.id, tenantId);
+
+            // A. Impacto en Stock y Costos
             await this.impactStockAndCosts(fullPurchase, tenantId);
+
+            // B. Generar Deuda al Proveedor
+            await this.generateProviderDebt(fullPurchase, tenantId);
         }
 
         return this.findOne(savedPurchase.id, tenantId);
@@ -66,10 +76,14 @@ export class PurchasesService {
     async update(id: string, dto: UpdatePurchaseDto, tenantId: string) {
         const purchase = await this.findOne(id, tenantId);
 
+        // ⚠️ ADVERTENCIA: Este sistema simple no soporta "Deshacer stock" si editas una compra ya recibida.
+        // Si editas una compra RECIBIDA, solo actualizamos datos de cabecera, no re-impactamos stock para evitar duplicados.
+        
         const { items, ...headerData } = dto;
         this.purchaseRepo.merge(purchase, headerData);
         const savedPurchase = await this.purchaseRepo.save(purchase);
 
+        // Actualizamos items solo si vienen en el DTO
         if (items) {
             await this.detailRepo.delete({ purchase: { id: id } });
             if (items.length > 0) {
@@ -88,9 +102,16 @@ export class PurchasesService {
             }
         }
 
+        // Detectamos transición de BORRADOR -> RECIBIDO
         if (dto.status === PurchaseStatus.RECEIVED && purchase.status !== PurchaseStatus.RECEIVED) {
+            // Validar sucursal antes de procesar
+            if (!purchase.branch) {
+                throw new BadRequestException('No se puede recibir la compra: Falta asignar una Sucursal.');
+            }
+
             const fresh = await this.findOne(id, tenantId);
             await this.impactStockAndCosts(fresh, tenantId);
+            await this.generateProviderDebt(fresh, tenantId);
         }
 
         return this.findOne(id, tenantId);
@@ -106,7 +127,7 @@ export class PurchasesService {
         return purchase;
     }
 
-    // --- FIND ALL (Agregado para que no de error el controller) ---
+    // --- FIND ALL ---
     async findAll(page: number, limit: number, filters: any, tenantId: string) {
         const query = this.purchaseRepo.createQueryBuilder('purchase')
             .leftJoinAndSelect('purchase.provider', 'provider')
@@ -116,7 +137,7 @@ export class PurchasesService {
         if (filters.provider_id) query.andWhere('purchase.provider_id = :pid', { pid: filters.provider_id });
         if (filters.status) query.andWhere('purchase.status = :status', { status: filters.status });
 
-        query.orderBy('purchase.date', 'DESC')
+        query.orderBy('purchase.created_at', 'DESC')
             .skip((page - 1) * limit)
             .take(limit);
 
@@ -124,99 +145,70 @@ export class PurchasesService {
         return { data, total };
     }
 
+    // --- HELPER: GENERAR DEUDA ---
+    private async generateProviderDebt(purchase: Purchase, tenantId: string) {
+        await this.currentAccountService.addMovement({
+            provider: { id: purchase.provider.id } as any,
+            type: MovementType.DEBIT,
+            concept: MovementConcept.PURCHASE, // Asegúrate que tu enum tenga 'PURCHASE' o 'COMPRA'
+            amount: purchase.total,
+            description: `Compra Fac. ${purchase.invoice_number || 'S/N'}`,
+            date: new Date(purchase.date), // Usamos la fecha de la factura, no hoy
+            reference_id: purchase.id
+        }, tenantId);
+    }
+
     // --- LÓGICA DE IMPACTO ---
-private async impactStockAndCosts(purchase: Purchase, tenantId: string) {
-        console.log(`🔎 Buscando Configuración para Tenant ID: "${tenantId}"`);
-
-        // 1. Buscamos la configuración de ESTA empresa
-        let setting = await this.settingsRepo.findOne({ 
-            where: { tenant: { id: tenantId } } 
-        });
-
-        // 🚑 FALLBACK DE EMERGENCIA (Solo para debug/desarrollo)
-        // Si no encuentra la config del tenant, agarra la primera que encuentre en la tabla
-        // para que no te explote el sistema con dólar a 1.
-        if (!setting) {
-            console.warn("⚠️ NO SE ENCONTRÓ CONFIGURACIÓN PARA ESTE TENANT. Buscando una genérica...");
-            const allSettings = await this.settingsRepo.find({ take: 1 });
-            if (allSettings.length > 0) {
-                setting = allSettings[0];
-                console.log("✅ Usando configuración genérica encontrada (ID):", setting.id);
-            }
+    private async impactStockAndCosts(purchase: Purchase, tenantId: string) {
+        // Validacion de seguridad
+        if (!purchase.branch) {
+            console.error("❌ Error Crítico: Intentando impactar stock sin sucursal asignada.");
+            return;
         }
 
-        // 2. Determinamos el valor del Dólar
-        // Tu entidad usa 'exchange_rate', así que priorizamos ese campo.
-        let globalDollar = 1;
-        
-        if (setting) {
-            // Convertimos a Number porque decimal viene como string desde la BD a veces
-            const rate = Number(setting.exchange_rate);
-            if (rate > 0) globalDollar = rate;
-        }
+        // 1. Configuración de Moneda
+        let setting = await this.settingsRepo.findOne({ where: { tenant: { id: tenantId } } });
+        let globalDollar = setting ? Number(setting.exchange_rate) : 1;
+        if (globalDollar <= 0) globalDollar = 1;
 
-        console.log(`💵 Dólar Global Efectivo: $${globalDollar}`);
-
-        if (globalDollar <= 1) {
-            console.error("⛔ ALERTA ROJA: El dólar es 1 o 0. Si guardas productos en USD, se romperán los precios.");
-        }
-
-        // 3. Datos de la Compra
         const purchaseRate = Number(purchase.exchange_rate) || 1;
         const purchaseCurrency = purchase.currency || 'ARS';
 
-        // Validación de seguridad por si TypeORM no trajo relaciones
-        if (!purchase.details || !Array.isArray(purchase.details)) {
-             console.warn("⚠️ La compra no tiene detalles cargados. Saltando impacto.");
-             return;
-        }
+        if (!purchase.details) return;
 
         for (const detail of purchase.details) {
             // A. SUMAR STOCK
+            // Ahora addStock es seguro y maneja duplicados
             await this.productsService.addStock(
                 detail.product.id,
                 Number(detail.quantity),
                 tenantId,
-                purchase.branch?.id
+                purchase.branch.id // Aquí sabemos que branch existe
             );
 
             // B. ACTUALIZAR PRECIOS
-            const product = await this.productsService.findOne(detail.product.id);
+            const product = await this.productsService.findOne(detail.product.id, tenantId);
 
             if (product) {
                 const productCurrency = product.currency || 'ARS';
-                let newCost = Number(detail.cost); // Costo tal cual vino en la factura
+                let newCost = Number(detail.cost);
 
-                console.log(`📦 ${product.name} | Base: ${productCurrency} | Fac: ${purchaseCurrency} $${newCost}`);
-
-                // --- LÓGICA DE CONVERSIÓN ---
-
-                // CASO 1: Factura ARS -> Producto USD (Ej: Taladro)
-                // Acción: DIVIDIR por la cotización GLOBAL.
+                // Conversión de Moneda
                 if (purchaseCurrency === 'ARS' && productCurrency === 'USD') {
-                    if (globalDollar > 1) {
-                        newCost = newCost / globalDollar;
-                        console.log(`🔄 ARS->USD: ${detail.cost} / ${globalDollar} = ${newCost.toFixed(2)}`);
-                    } else {
-                        console.warn(`❌ No se convirtió ARS->USD porque el dólar es ${globalDollar}`);
-                    }
-                }
-                
-                // CASO 2: Factura USD -> Producto ARS (Ej: Cemento)
-                // Acción: MULTIPLICAR por la cotización DE LA FACTURA.
+                    if (globalDollar > 1) newCost = newCost / globalDollar;
+                } 
                 else if (purchaseCurrency === 'USD' && productCurrency === 'ARS') {
                     newCost = newCost * purchaseRate;
-                    console.log(`🔄 USD->ARS: ${detail.cost} * ${purchaseRate} = ${newCost.toFixed(2)}`);
                 }
 
-                // --- CÁLCULO DE VENTA ---
+                // Cálculo de Venta
                 const margin = Number(product.profit_margin) || 30;
                 const vat = Number(product.vat_rate) || 21;
 
                 const netPrice = newCost * (1 + margin / 100);
                 const newSalePrice = netPrice * (1 + vat / 100);
 
-                // Guardamos
+                // Guardamos usando la lógica inteligente del ProductsService
                 await this.productsService.updateProductCosts(
                     product.id,
                     newCost,

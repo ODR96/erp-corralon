@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, ILike } from 'typeorm';
 import { Product } from '../entities/product.entity';
@@ -13,6 +13,7 @@ export class ProductsService {
         @InjectRepository(Stock) private stockRepo: Repository<Stock>,
     ) { }
 
+    // --- CREAR ---
     async create(createProductDto: CreateProductDto, tenantId: string) {
         const product = this.productRepo.create({
             ...createProductDto,
@@ -25,10 +26,11 @@ export class ProductsService {
         try {
             return await this.productRepo.save(product);
         } catch (error) {
-            this.handleDbErrors(error); // <--- Usamos una función auxiliar
+            this.handleDbErrors(error);
         }
     }
 
+    // --- LISTAR CON STOCK TOTAL ---
     async findAll(
         page: number,
         limit: number,
@@ -44,8 +46,7 @@ export class ProductsService {
             .leftJoinAndSelect('product.category', 'category')
             .leftJoinAndSelect('product.unit', 'unit')
             .leftJoinAndSelect('product.provider', 'provider')
-            // 👇 TRUCO: Traemos también los stocks para sumarlos en JS (es más seguro que hacerlo en SQL directo por ahora)
-            .leftJoinAndSelect('product.stocks', 'stocks')
+            .leftJoinAndSelect('product.stocks', 'stocks') // Traemos stocks para sumar
             .where('product.tenant_id = :tenantId', { tenantId });
 
         if (search) {
@@ -71,35 +72,32 @@ export class ProductsService {
             .skip(skip)
             .getManyAndCount();
 
-        // 👇 AQUÍ CALCULAMOS EL TOTAL
+        // Enriquecemos con el total de stock (suma de todas las sucursales)
         const enrichedProducts = products.map(p => {
-            // Sumamos la cantidad de todos los registros de stock de este producto
             const totalStock = p.stocks?.reduce((sum, stock) => sum + Number(stock.quantity), 0) || 0;
-
-            // Limpiamos la lista de stocks para no enviar datos basura al front, solo mandamos el total
+            
+            // Quitamos la lista detallada de stocks para no ensuciar la respuesta JSON
             const { stocks, ...productData } = p;
 
             return {
                 ...productData,
-                total_stock: totalStock // <--- Campo nuevo
+                total_stock: totalStock
             };
         });
 
         return { data: enrichedProducts, total };
     }
 
+    // --- BUSCAR UNO ---
     async findOne(id: string, tenantId?: string) {
-        // Usamos QueryBuilder para hacer uniones (Joins) más complejas y traer el stock
         const query = this.productRepo.createQueryBuilder('product')
             .leftJoinAndSelect('product.category', 'category')
             .leftJoinAndSelect('product.unit', 'unit')
             .leftJoinAndSelect('product.provider', 'provider')
-            // 👇 ESTO ES LO IMPORTANTE: Traer stocks y la sucursal de cada stock
             .leftJoinAndSelect('product.stocks', 'stocks')
-            .leftJoinAndSelect('stocks.branch', 'branch')
+            .leftJoinAndSelect('stocks.branch', 'branch') // Importante para ver en qué sucursal está
             .where('product.id = :id', { id });
 
-        // Seguridad: Si pasamos tenantId, filtramos para que no vean productos de otro
         if (tenantId) {
             query.andWhere('product.tenant_id = :tenantId', { tenantId });
         }
@@ -110,23 +108,21 @@ export class ProductsService {
         return product;
     }
     
+    // --- ACTUALIZAR ---
     async update(id: string, updateProductDto: UpdateProductDto) {
         const product = await this.findOne(id);
 
-        // Usamos 'any' temporalmente para manipular las relaciones sin pelear con TypeScript
         const updatedData: any = { ...updateProductDto };
 
         if (updateProductDto.category_id) updatedData.category = { id: updateProductDto.category_id };
         if (updateProductDto.unit_id) updatedData.unit = { id: updateProductDto.unit_id };
 
-        // Aquí sí podemos usar null explícito porque estamos manipulando el objeto directamente para .save()
         if (updateProductDto.provider_id) {
             updatedData.provider = { id: updateProductDto.provider_id };
         } else if (updateProductDto.provider_id === null) {
             updatedData.provider = null;
         }
 
-        // Limpiamos los IDs planos para no duplicar datos
         delete updatedData.category_id;
         delete updatedData.unit_id;
         delete updatedData.provider_id;
@@ -140,9 +136,7 @@ export class ProductsService {
     }
 
     async remove(id: string, hard: boolean = false) {
-        if (hard) {
-            return this.productRepo.delete(id);
-        }
+        if (hard) return this.productRepo.delete(id);
         return this.productRepo.softDelete(id);
     }
 
@@ -150,56 +144,70 @@ export class ProductsService {
         return this.productRepo.restore(id);
     }
 
-    private handleDbErrors(error: any) {
-        // El código '23505' es el error de "Unique Violation" en Postgres
-        if (error.code === '23505') {
-            // Verificamos qué campo duplicó para ser específicos
-            if (error.detail.includes('sku')) {
-                throw new ConflictException('Ya existe un producto con este SKU.');
-            }
-            if (error.detail.includes('barcode')) {
-                throw new ConflictException('Ya existe un producto con este Código de Barras.');
-            }
-            throw new ConflictException('El registro ya existe (Dato duplicado).');
-        }
-        // Si es otro error, que explote normalmente
-        throw error;
-    }
-
-    async addStock(productId: string, quantity: number, tenantId: string, branchId?: string) {
+    // --- MOVIMIENTO DE STOCK (CORREGIDO) ---
+async addStock(productId: string, quantity: number, tenantId: string, branchId?: string) {
         if (!branchId) {
-            console.warn(`Intento de agregar stock al producto ${productId} sin especificar sucursal.`);
-            return null; // O lanzar error según prefieras
+            throw new BadRequestException(`No se puede mover stock del producto ${productId} sin especificar Sucursal.`);
         }
 
-        // 1. Buscamos si ya existe stock para este producto en esa sucursal
+        // 1. Buscamos el registro
+        // Nota: NO usamos 'withDeleted' porque tu entidad Stock no tiene soft-delete.
         let stockRecord = await this.stockRepo.findOne({
             where: {
                 product: { id: productId },
-                branch: { id: branchId },
-                tenant: { id: tenantId }
+                branch: { id: branchId }
+                // Quitamos el filtro de tenant para asegurar que encontramos el registro físico si ya existe
             }
         });
 
-        // 2. Si no existe, lo inicializamos en 0
-        if (!stockRecord) {
-            stockRecord = this.stockRepo.create({
-                product: { id: productId },
-                branch: { id: branchId },
-                quantity: 0,
-                tenant: { id: tenantId }
-            });
+        try {
+            if (stockRecord) {
+                // A. Si existe -> ACTUALIZAMOS (UPDATE)
+                stockRecord.quantity = Number(stockRecord.quantity) + Number(quantity);
+                // TypeORM actualiza automáticamente 'last_updated' gracias al decorador @UpdateDateColumn, 
+                // pero forzarlo a veces ayuda a que detecte el cambio si la cantidad es igual.
+                // stockRecord.last_updated = new Date(); 
+                
+                // Aseguramos que el tenant sea consistente
+                stockRecord.tenant = { id: tenantId } as any; 
+
+                return await this.stockRepo.save(stockRecord);
+            } else {
+                // B. Si no existe -> CREAMOS (INSERT)
+                const newStock = this.stockRepo.create({
+                    product: { id: productId },
+                    branch: { id: branchId },
+                    tenant: { id: tenantId },
+                    quantity: Number(quantity)
+                });
+
+                return await this.stockRepo.save(newStock);
+            }
+        } catch (error) {
+            // C. RED DE SEGURIDAD (CATCH)
+            // Si ocurre el error "duplicate key" (23505), es porque el registro YA EXISTE
+            // pero el 'findOne' de arriba no lo vio (quizás se creó milisegundos después).
+            if (error.code === '23505') {
+                console.warn("⚠️ Conflicto de stock duplicado resuelto automáticamente.");
+                
+                // Reintentamos buscando de nuevo, ahora seguro que aparece
+                const retryStock = await this.stockRepo.findOne({
+                    where: { product: { id: productId }, branch: { id: branchId } }
+                });
+
+                if (retryStock) {
+                    retryStock.quantity = Number(retryStock.quantity) + Number(quantity);
+                    return await this.stockRepo.save(retryStock);
+                }
+            }
+            // Si es otro error, que explote para que te enteres
+            console.error("Error crítico moviendo stock:", error);
+            throw error;
         }
-
-        // 3. Sumamos
-        stockRecord.quantity = Number(stockRecord.quantity) + Number(quantity);
-
-        // 4. Guardamos
-        return this.stockRepo.save(stockRecord);
     }
 
+    // --- ACTUALIZACIÓN DE PRECIOS AUTOMÁTICA ---
     async updateProductCosts(id: string, newCost: number, newSalePrice: number, tenantId: string) {
-        // 1. Buscamos el producto completo
         const product = await this.productRepo.findOne({ where: { id, tenant: { id: tenantId } } });
 
         if (!product) {
@@ -207,29 +215,34 @@ export class ProductsService {
             return;
         }
 
-        // 2. Actualizamos Costo y Venta (Lo básico)
-        product.cost_price = Number(newCost);
-        product.sale_price = Number(newSalePrice);
-
-        // 3. 👇 ACTUALIZACIÓN INTELIGENTE DE PRECIO LISTA
-        // Si el producto tiene un descuento configurado, recalculamos el precio de lista 
-        // para que coincida con el nuevo costo.
-        // Fórmula: Costo = Lista * (1 - Desc/100)  --->  Lista = Costo / (1 - Desc/100)
-
+        // Aseguramos números
+        const cost = Number(newCost);
+        const sale = Number(newSalePrice);
         const discount = Number(product.provider_discount) || 0;
 
+        product.cost_price = cost;
+        product.sale_price = sale;
+
+        // Lógica de ingeniería inversa: Si tengo descuento, infiero el precio de lista original
         if (discount > 0 && discount < 100) {
-            // Evitamos división por cero si el descuento fuera 100%
-            const newListPrice = newCost / (1 - (discount / 100));
-            product.list_price = Number(newListPrice.toFixed(2)); // Redondeamos a 2 decimales
+            // Lista = Costo / (1 - 0.Descuento)
+            const newListPrice = cost / (1 - (discount / 100));
+            product.list_price = Number(newListPrice.toFixed(2));
         } else {
-            // Si no tiene descuento, el Precio Lista es igual al Costo
-            product.list_price = Number(newCost);
+            product.list_price = cost;
         }
 
-        // 4. Guardamos todo junto
         await this.productRepo.save(product);
+        console.log(`💰 Precios actualizados para ${product.name}: Costo $${cost} -> Venta $${sale}`);
+    }
 
-        console.log(`✅ ${product.name} actualizado: Lista $${product.list_price} | Costo $${product.cost_price} | Venta $${product.sale_price}`);
+    // --- MANEJO DE ERRORES ---
+    private handleDbErrors(error: any) {
+        if (error.code === '23505') {
+            if (error.detail.includes('sku')) throw new ConflictException('Ya existe un producto con este SKU.');
+            if (error.detail.includes('barcode')) throw new ConflictException('Ya existe un producto con este Código de Barras.');
+            throw new ConflictException('El registro ya existe (Dato duplicado).');
+        }
+        throw error;
     }
 }

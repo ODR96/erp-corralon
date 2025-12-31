@@ -15,8 +15,8 @@ export class ChecksService {
         private readonly accountService: CurrentAccountService
     ) { }
 
-    async create(createDto: CreateCheckDto, tenantId: string) {
-        // Validar duplicado: Mismo Banco + Mismo Número + Mismo Tenant = ERROR
+async create(createDto: CreateCheckDto, tenantId: string) {
+        // Validar duplicado
         const exists = await this.checkRepo.findOne({
             where: {
                 number: createDto.number,
@@ -29,9 +29,6 @@ export class ChecksService {
             throw new BadRequestException(`Ya existe el cheque #${createDto.number} del banco ${createDto.bank_name}`);
         }
 
-        // Alerta de Fecha (Opcional): Aquí podríamos consultar si hay otros cheques ese día, 
-        // pero para no bloquear el flujo, lo ideal es manejar esa alerta en el Front antes de enviar.
-
         const check = this.checkRepo.create();
         Object.assign(check, createDto);
         check.tenant = { id: tenantId } as any;
@@ -39,18 +36,31 @@ export class ChecksService {
         if (createDto.client_id) check.client = { id: createDto.client_id } as any;
         if (createDto.provider_id) check.provider = { id: createDto.provider_id } as any;
 
-        const savedCheck = await this.checkRepo.save(check); // Guardamos primero
+        const savedCheck = await this.checkRepo.save(check);
 
-        // 🤖 AUTOMATIZACIÓN: Si es cheque PROPIO y tiene PROVEEDOR, baja la deuda
+        // A. SI ES CHEQUE PROPIO (Pago a Proveedor) -> Baja Deuda Proveedor
         if (createDto.type === CheckType.OWN && createDto.provider_id) {
             await this.accountService.addMovement({
-                date: new Date(createDto.issue_date), // O fecha de entrega
-                type: MovementType.CREDIT, // CREDIT = Baja deuda del proveedor (Pagamos)
+                date: new Date(createDto.issue_date),
+                type: MovementType.CREDIT, // CREDIT baja deuda del proveedor (Pagamos)
                 concept: MovementConcept.CHECK,
                 amount: createDto.amount,
                 description: `Pago con Cheque #${createDto.number} (${createDto.bank_name})`,
                 provider: { id: createDto.provider_id } as any,
-                check: savedCheck // Vinculamos el cheque al movimiento
+                check: savedCheck
+            }, tenantId);
+        }
+
+        // B. 👇 NUEVO: SI ES CHEQUE DE TERCEROS (Cobro a Cliente) -> Baja Deuda Cliente
+        if (createDto.type === CheckType.THIRD_PARTY && createDto.client_id) {
+            await this.accountService.addMovement({
+                date: new Date(), // Fecha de recepción
+                type: MovementType.CREDIT, // CREDIT a favor del cliente (Pagó) -> Baja su deuda
+                concept: MovementConcept.CHECK,
+                amount: createDto.amount,
+                description: `Recibido Cheque #${createDto.number} (${createDto.bank_name})`,
+                client: { id: createDto.client_id } as any, // Asignamos al cliente
+                check: savedCheck
             }, tenantId);
         }
 
