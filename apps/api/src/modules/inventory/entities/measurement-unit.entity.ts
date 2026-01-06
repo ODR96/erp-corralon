@@ -1,9 +1,14 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn } from 'typeorm';
+import { Tenant } from 'src/modules/tenants/entities/tenant.entity';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn, JoinColumn, ManyToOne } from 'typeorm';
 
 @Entity('measurement_units')
 export class MeasurementUnit {
     @PrimaryGeneratedColumn('uuid')
     id: string;
+
+    @ManyToOne(() => Tenant, { nullable: true }) 
+    @JoinColumn({ name: 'tenant_id' })
+    tenant: Tenant;
 
     @Column('text')
     name: string;      // Ej: "Kilogramo", "Metro", "Unidad"

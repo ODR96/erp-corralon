@@ -58,17 +58,40 @@ export class ProductsController {
     }
 
     // 👇 ENDPOINT IMPORTAR
-    @Post('import/excel')
-    @RequirePermissions('products.manage')
-    @UseInterceptors(FileInterceptor('file')) // 'file' es el nombre del campo en el FormData
+    @Post('import/analyze')
+    @UseInterceptors(FileInterceptor('file'))
+    async analyze(@UploadedFile() file: Express.Multer.File) {
+        return this.productsService.getExcelColumns(file);
+    }
+
+    // Endpoint de importación actualizado
+@Post('import/excel')
+    @UseInterceptors(FileInterceptor('file'))
     async import(
         @UploadedFile() file: Express.Multer.File, 
-        @Request() req: any
+        @Request() req: any,
+        @Body() body: any 
     ) {
-        if (!file) throw new BadRequestException('No se subió ningún archivo');
-        
         const tenantId = req.user.tenant?.id;
-        return this.productsService.importFromExcel(file, tenantId);
+        const columnMap = body.column_map ? JSON.parse(body.column_map) : null;
+        
+        // Empaquetamos los defaults
+        const defaults = {
+            categoryId: body.default_category_id || undefined,
+            unitId: body.default_unit_id || undefined,
+            margin: body.default_margin ? Number(body.default_margin) : undefined,
+            vat: body.default_vat ? Number(body.default_vat) : undefined,
+            discount: body.default_discount ? Number(body.default_discount) : undefined,
+            skuPrefix: body.sku_prefix || undefined, // 👈 NUEVO
+        };
+
+        return this.productsService.importFromExcel(
+            file, 
+            tenantId, 
+            body.provider_id, 
+            columnMap, 
+            defaults
+        );
     }
 
     @Get(':id')
