@@ -5,6 +5,7 @@ import { CashRegister } from '../entities/cash-register.entity';
 import { CashTransaction, TransactionType, TransactionConcept } from '../entities/cash-transaction.entity';
 import { OpenBoxDto, CloseBoxDto, CreateMovementDto } from '../dto/cash-register.dto';
 import { User } from '../../users/entities/user.entity';
+import { EntityManager } from 'typeorm';
 
 @Injectable()
 export class CashService {
@@ -88,16 +89,14 @@ export class CashService {
     }
 
     // 4. REGISTRAR MOVIMIENTO (Ventas, Gastos, Retiros)
-    async addTransaction(dto: CreateMovementDto, user: User) {
-        // Necesitamos la caja abierta del usuario
+async addTransaction(dto: CreateMovementDto, user: User, externalManager?: EntityManager) {
+        // 1. Buscamos la caja (esto es lectura, podemos usar el repo normal o el manager si quisieras ser estricto)
         const box = await this.boxRepo.findOne({ where: { user: { id: user.id }, status: 'OPEN' } });
         
-        // OJO: Si es una VENTA AUTOMÁTICA y no hay caja abierta, ¿qué hacemos?
-        // Opción A: Error (Obligar a abrir caja). <--- RECOMENDADO
-        // Opción B: Crear caja fantasma (Peligroso).
-        if (!box) throw new BadRequestException('Debes ABRIR CAJA antes de realizar movimientos o ventas en efectivo.');
+        if (!box) throw new BadRequestException('Debes ABRIR CAJA antes de realizar movimientos.');
 
-        return this.dataSource.transaction(async (manager) => {
+        // 2. Definimos la función lógica de guardar
+        const saveLogic = async (manager: EntityManager) => {
             // A. Crear la transacción
             const tx = manager.create(CashTransaction, {
                 cashRegister: box,
@@ -109,22 +108,27 @@ export class CashService {
             });
             await manager.save(tx);
 
-            // B. Actualizar saldo de la caja
+            // B. Actualizar saldo
             let newBalance = Number(box.current_balance);
             if (dto.type === TransactionType.IN) {
                 newBalance += dto.amount;
             } else {
                 newBalance -= dto.amount;
             }
-
-            // Validar saldo negativo si la config no lo permite (Opcional, por ahora dejamos pasar)
-            // if (newBalance < 0) throw ...
-
             box.current_balance = newBalance;
             await manager.save(box);
 
             return tx;
-        });
+        };
+
+        // 3. DECISIÓN: ¿Usamos la transacción externa o creamos una nueva?
+        if (externalManager) {
+            // Si viene de Ventas/Pagos, usamos su transacción
+            return saveLogic(externalManager);
+        } else {
+            // Si es un movimiento manual suelto, creamos una transacción propia
+            return this.dataSource.transaction(async (newManager) => saveLogic(newManager));
+        }
     }
 
     // EXTRA: Ver historial de movimientos de la caja actual

@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, EntityManager } from 'typeorm';
 import { CurrentAccountMovement, MovementType } from '../entities/current-account.entity';
 
 @Injectable()
@@ -63,11 +63,18 @@ export class CurrentAccountService {
     /**
      * Registra un nuevo movimiento manual o automático
      */
-    async addMovement(data: Partial<CurrentAccountMovement>, tenantId: string) {
-        const movement = this.movementRepo.create({
+    async addMovement(
+        data: Partial<CurrentAccountMovement>,
+        tenantId: string,
+        manager?: EntityManager // <--- Parámetro opcional nuevo
+    ) {
+        // Si viene un manager (transacción), usamos ese. Si no, usamos el repo normal.
+        const repo = manager ? manager.getRepository(CurrentAccountMovement) : this.movementRepo;
+
+        const movement = repo.create({
             ...data,
             tenant: { id: tenantId } as any
         });
-        return this.movementRepo.save(movement);
+        return repo.save(movement);
     }
 }

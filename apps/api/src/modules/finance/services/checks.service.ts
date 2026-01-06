@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, ILike, LessThan, MoreThanOrEqual, Brackets } from 'typeorm';
+import { Repository, Between, ILike, LessThan, MoreThanOrEqual, Brackets, EntityManager } from 'typeorm';
 import { Check, CheckStatus, CheckType } from '../entities/check.entity';
 import { CreateCheckDto } from '../dto/create-check.dto';
 import { UpdateCheckDto } from '../dto/update-check.dto';
@@ -15,9 +15,13 @@ export class ChecksService {
         private readonly accountService: CurrentAccountService
     ) { }
 
-async create(createDto: CreateCheckDto, tenantId: string) {
-        // Validar duplicado
-        const exists = await this.checkRepo.findOne({
+async create(createDto: CreateCheckDto, tenantId: string, manager?: EntityManager) {
+        
+        // Si nos pasan un manager (transacción), usamos ese repo. Si no, el normal.
+        const repo = manager ? manager.getRepository(Check) : this.checkRepo;
+
+        // Validar duplicado (usando el repo correcto)
+        const exists = await repo.findOne({
             where: {
                 number: createDto.number,
                 bank_name: createDto.bank_name,
@@ -29,39 +33,39 @@ async create(createDto: CreateCheckDto, tenantId: string) {
             throw new BadRequestException(`Ya existe el cheque #${createDto.number} del banco ${createDto.bank_name}`);
         }
 
-        const check = this.checkRepo.create();
+        const check = repo.create();
         Object.assign(check, createDto);
         check.tenant = { id: tenantId } as any;
 
         if (createDto.client_id) check.client = { id: createDto.client_id } as any;
         if (createDto.provider_id) check.provider = { id: createDto.provider_id } as any;
 
-        const savedCheck = await this.checkRepo.save(check);
+        const savedCheck = await repo.save(check);
 
-        // A. SI ES CHEQUE PROPIO (Pago a Proveedor) -> Baja Deuda Proveedor
+        // A. SI ES CHEQUE PROPIO (Pago a Proveedor)
         if (createDto.type === CheckType.OWN && createDto.provider_id) {
             await this.accountService.addMovement({
                 date: new Date(createDto.issue_date),
-                type: MovementType.CREDIT, // CREDIT baja deuda del proveedor (Pagamos)
+                type: MovementType.CREDIT,
                 concept: MovementConcept.CHECK,
                 amount: createDto.amount,
                 description: `Pago con Cheque #${createDto.number} (${createDto.bank_name})`,
                 provider: { id: createDto.provider_id } as any,
                 check: savedCheck
-            }, tenantId);
+            }, tenantId, manager); // 👈 Pasamos el manager al accountService también
         }
 
-        // B. 👇 NUEVO: SI ES CHEQUE DE TERCEROS (Cobro a Cliente) -> Baja Deuda Cliente
+        // B. SI ES CHEQUE DE TERCEROS (Cobro a Cliente)
         if (createDto.type === CheckType.THIRD_PARTY && createDto.client_id) {
             await this.accountService.addMovement({
-                date: new Date(), // Fecha de recepción
-                type: MovementType.CREDIT, // CREDIT a favor del cliente (Pagó) -> Baja su deuda
+                date: new Date(),
+                type: MovementType.CREDIT, 
                 concept: MovementConcept.CHECK,
                 amount: createDto.amount,
                 description: `Recibido Cheque #${createDto.number} (${createDto.bank_name})`,
-                client: { id: createDto.client_id } as any, // Asignamos al cliente
+                client: { id: createDto.client_id } as any,
                 check: savedCheck
-            }, tenantId);
+            }, tenantId, manager); // 👈 Pasamos el manager
         }
 
         return savedCheck;

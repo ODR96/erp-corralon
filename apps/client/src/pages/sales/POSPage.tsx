@@ -94,6 +94,9 @@ export const POSPage = () => {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [saleType, setSaleType] = useState<"VENTA" | "PRESUPUESTO">("VENTA");
   const [settings, setSettings] = useState<any>({});
+  const [checkBank, setCheckBank] = useState("");
+  const [checkNumber, setCheckNumber] = useState("");
+  const [checkDate, setCheckDate] = useState(""); // YYYY-MM-DD
 
   // Cliente
   const [clientInputValue, setClientInputValue] = useState("");
@@ -303,6 +306,12 @@ export const POSPage = () => {
       );
       return;
     }
+    if (paymentMethod === "CHEQUE") {
+      if (!checkBank || !checkNumber || !checkDate) {
+        showNotification("Por favor complete los datos del Cheque.", "warning");
+        return;
+      }
+    }
 
     const finalCustomerName = selectedClient
       ? selectedClient.name
@@ -318,6 +327,15 @@ export const POSPage = () => {
       customer_name: finalCustomerName,
       customer_tax_id: finalTaxId,
       items: cart.map((i) => ({ product_id: i.id, quantity: i.quantity })),
+      check_details:
+        paymentMethod === "CHEQUE"
+          ? {
+              bank_name: checkBank,
+              number: checkNumber,
+              payment_date: checkDate,
+              amount: total, // Asumimos que el cheque cubre el total exacto
+            }
+          : undefined,
     };
 
     try {
@@ -341,6 +359,9 @@ export const POSPage = () => {
       setPaymentMethod("EFECTIVO");
       setInstallments(1);
       setInterestPercent(0);
+      setCheckBank("");
+      setCheckNumber("");
+      setCheckDate("");
     } catch (error: any) {
       showNotification(error.response?.data?.message || "Error", "error");
     }
@@ -713,15 +734,49 @@ export const POSPage = () => {
                   </Grid>
                 </Grid>
               )}
-              {(paymentMethod === "TRANSFERENCIA" ||
-                paymentMethod === "CHEQUE") && (
+              {/* Opción A: TRANSFERENCIA (Solo referencia) */}
+              {paymentMethod === "TRANSFERENCIA" && (
                 <TextField
-                  label="Referencia"
+                  label="N° Operación / Referencia"
                   fullWidth
                   margin="normal"
                   value={paymentReference}
                   onChange={(e) => setPaymentReference(e.target.value)}
                 />
+              )}
+
+              {/* Opción B: CHEQUE (Datos completos) */}
+              {paymentMethod === "CHEQUE" && (
+                <Grid container spacing={2} sx={{ mt: 1 }}>
+                  <Grid item xs={6}>
+                    <TextField
+                      label="Banco"
+                      placeholder="Ej: Galicia"
+                      fullWidth
+                      value={checkBank}
+                      onChange={(e) => setCheckBank(e.target.value)}
+                    />
+                  </Grid>
+                  <Grid item xs={6}>
+                    <TextField
+                      label="N° Cheque"
+                      fullWidth
+                      value={checkNumber}
+                      onChange={(e) => setCheckNumber(e.target.value)}
+                    />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <TextField
+                      label="Fecha de Cobro"
+                      type="date"
+                      fullWidth
+                      InputLabelProps={{ shrink: true }}
+                      value={checkDate}
+                      onChange={(e) => setCheckDate(e.target.value)}
+                      helperText="Fecha en la que se podrá depositar"
+                    />
+                  </Grid>
+                </Grid>
               )}
             </>
           )}
