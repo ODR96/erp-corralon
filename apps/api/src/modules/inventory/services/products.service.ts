@@ -5,6 +5,8 @@ import { Product } from '../entities/product.entity';
 import { CreateProductDto } from '../dto/create-product.dto';
 import { UpdateProductDto } from '../dto/update-product.dto';
 import { Stock } from '../entities/stock.entity';
+import * as XLSX from 'xlsx';
+import { Response } from 'express';
 
 @Injectable()
 export class ProductsService {
@@ -75,7 +77,7 @@ export class ProductsService {
         // Enriquecemos con el total de stock (suma de todas las sucursales)
         const enrichedProducts = products.map(p => {
             const totalStock = p.stocks?.reduce((sum, stock) => sum + Number(stock.quantity), 0) || 0;
-            
+
             // Quitamos la lista detallada de stocks para no ensuciar la respuesta JSON
             const { stocks, ...productData } = p;
 
@@ -107,7 +109,7 @@ export class ProductsService {
         if (!product) throw new NotFoundException('Producto no encontrado');
         return product;
     }
-    
+
     // --- ACTUALIZAR ---
     async update(id: string, updateProductDto: UpdateProductDto) {
         const product = await this.findOne(id);
@@ -145,7 +147,7 @@ export class ProductsService {
     }
 
     // --- MOVIMIENTO DE STOCK (CORREGIDO) ---
-async addStock(productId: string, quantity: number, tenantId: string, branchId?: string) {
+    async addStock(productId: string, quantity: number, tenantId: string, branchId?: string) {
         if (!branchId) {
             throw new BadRequestException(`No se puede mover stock del producto ${productId} sin especificar Sucursal.`);
         }
@@ -167,9 +169,9 @@ async addStock(productId: string, quantity: number, tenantId: string, branchId?:
                 // TypeORM actualiza automáticamente 'last_updated' gracias al decorador @UpdateDateColumn, 
                 // pero forzarlo a veces ayuda a que detecte el cambio si la cantidad es igual.
                 // stockRecord.last_updated = new Date(); 
-                
+
                 // Aseguramos que el tenant sea consistente
-                stockRecord.tenant = { id: tenantId } as any; 
+                stockRecord.tenant = { id: tenantId } as any;
 
                 return await this.stockRepo.save(stockRecord);
             } else {
@@ -189,7 +191,7 @@ async addStock(productId: string, quantity: number, tenantId: string, branchId?:
             // pero el 'findOne' de arriba no lo vio (quizás se creó milisegundos después).
             if (error.code === '23505') {
                 console.warn("⚠️ Conflicto de stock duplicado resuelto automáticamente.");
-                
+
                 // Reintentamos buscando de nuevo, ahora seguro que aparece
                 const retryStock = await this.stockRepo.findOne({
                     where: { product: { id: productId }, branch: { id: branchId } }
@@ -244,5 +246,118 @@ async addStock(productId: string, quantity: number, tenantId: string, branchId?:
             throw new ConflictException('El registro ya existe (Dato duplicado).');
         }
         throw error;
+    }
+
+    async exportToExcel(tenantId: string, res: Response) {
+        // 1. Buscamos todos los productos (sin paginación)
+        const products = await this.productRepo.find({
+            where: { tenant: { id: tenantId } },
+            relations: ['category', 'unit', 'stocks', 'stocks.branch']
+        });
+
+        // 2. Aplanamos los datos para el Excel
+        const data = products.map(p => {
+            // Calculamos stock total
+            const totalStock = p.stocks?.reduce((acc, s) => acc + Number(s.quantity), 0) || 0;
+
+            return {
+                ID: p.id, // Útil para actualizar luego
+                NOMBRE: p.name,
+                SKU: p.sku,
+                CODIGO_BARRAS: p.barcode,
+                CATEGORIA: p.category?.name || 'General',
+                UNIDAD: p.unit?.name || 'Unidad',
+                PRECIO_COSTO: p.cost_price,
+                MARGEN: p.profit_margin,
+                IVA: p.vat_rate,
+                PRECIO_VENTA: p.sale_price,
+                STOCK_TOTAL: totalStock
+            };
+        });
+
+        // 3. Generamos la hoja de cálculo
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Productos');
+
+        // 4. Escribimos el buffer y enviamos
+        const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+        res.set({
+            'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition': `attachment; filename=productos_${new Date().getTime()}.xlsx`,
+            'Content-Length': buffer.length,
+        });
+
+        res.end(buffer);
+    }
+
+    // --- IMPORTAR DESDE EXCEL ---
+    async importFromExcel(file: Express.Multer.File, tenantId: string) {
+        // 1. Leer el Buffer
+        const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+
+        // 2. Convertir a JSON
+        const rawData = XLSX.utils.sheet_to_json(sheet);
+
+        let created = 0;
+        let updated = 0;
+        let errors = 0;
+
+        for (const row of rawData as any[]) {
+            try {
+                // Mínima validación
+                if (!row['NOMBRE']) continue;
+
+                // 3. Buscar si ya existe por SKU o Código de Barras o ID
+                let product: Product | null = null;
+
+                // Prioridad 1: ID (si viene del export)
+                if (row['ID']) {
+                    product = await this.productRepo.findOne({ where: { id: row['ID'], tenant: { id: tenantId } } });
+                }
+
+                // Prioridad 2: SKU
+                if (!product && row['SKU']) {
+                    product = await this.productRepo.findOne({ where: { sku: row['SKU'], tenant: { id: tenantId } } });
+                }
+
+                // Datos a guardar
+                const productData = {
+                    name: row['NOMBRE'],
+                    sku: row['SKU'] ? String(row['SKU']) : undefined,
+                    barcode: row['CODIGO_BARRAS'] ? String(row['CODIGO_BARRAS']) : undefined,
+                    cost_price: Number(row['PRECIO_COSTO']) || 0,
+                    profit_margin: Number(row['MARGEN']) || 0,
+                    vat_rate: Number(row['IVA']) || 0,
+                    sale_price: Number(row['PRECIO_VENTA']) || 0,
+                };
+
+                if (product) {
+                    // ACTUALIZAR
+                    await this.productRepo.update(product.id, productData);
+                    updated++;
+                } else {
+                    // CREAR NUEVO
+                    const newProduct = this.productRepo.create({
+                        ...productData,
+                        tenant: { id: tenantId }
+                    });
+                    await this.productRepo.save(newProduct);
+                    created++;
+                }
+
+            } catch (error) {
+                console.error("Error importando fila:", row, error);
+                errors++;
+            }
+        }
+
+        return {
+            message: 'Importación finalizada',
+            stats: { created, updated, errors }
+        };
     }
 }

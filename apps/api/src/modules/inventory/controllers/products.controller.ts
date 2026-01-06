@@ -1,8 +1,10 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Request, BadRequestException, Res, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { ProductsService } from '../services/products.service';
 import { CreateProductDto } from '../dto/create-product.dto';
 import { UpdateProductDto } from '../dto/update-product.dto';
 import { AuthGuard } from '@nestjs/passport';
+import type { Response } from 'express';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 // 👇 IMPORTAMOS LA NUEVA SEGURIDAD
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -46,6 +48,27 @@ export class ProductsController {
             providerId,
             withDeleted === 'true' // Convertimos string a boolean
         );
+    }
+
+    @Get('export/excel')
+    @RequirePermissions('products.manage')
+    async export(@Request() req: any, @Res() res: Response) {
+        const tenantId = req.user.tenant?.id;
+        return this.productsService.exportToExcel(tenantId, res);
+    }
+
+    // 👇 ENDPOINT IMPORTAR
+    @Post('import/excel')
+    @RequirePermissions('products.manage')
+    @UseInterceptors(FileInterceptor('file')) // 'file' es el nombre del campo en el FormData
+    async import(
+        @UploadedFile() file: Express.Multer.File, 
+        @Request() req: any
+    ) {
+        if (!file) throw new BadRequestException('No se subió ningún archivo');
+        
+        const tenantId = req.user.tenant?.id;
+        return this.productsService.importFromExcel(file, tenantId);
     }
 
     @Get(':id')
