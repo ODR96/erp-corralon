@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'; // 👈 Agregado ForbiddenException
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, ILike } from 'typeorm';
+import { Repository, ILike, IsNull } from 'typeorm';
 import { User } from './entities/user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -21,27 +21,6 @@ export class UsersService {
     // Cambiamos la firma para recibir IDs y el usuario que hace la petición
     async create(createDto: CreateUserDto, tenantId: string, currentUser: any) {
 
-        // 🕵️‍♂️ LOGS DE DETECTIVE
-        console.log('--- INTENTO DE CREACIÓN DE USUARIO ---');
-        console.log('1. Usuario Solicitante:', currentUser.email);
-        console.log('2. ¿Es Super Admin?', currentUser.is_super_admin); // ¿Qué dice aquí?
-        console.log('3. Datos recibidos (DTO):', createDto);
-        console.log('4. ¿Intenta crear Super Admin?', createDto.is_super_admin);
-
-        // 🔒 BLINDAJE NIVEL 1: Boolean Flag
-        // Si currentUser.is_super_admin es falso/undefined, ENTRA al if.
-        if (!currentUser.is_super_admin) {
-
-            // Si intenta marcarse como Super Admin...
-            if (createDto.is_super_admin === true || createDto.is_super_admin === 'true' as any) {
-                console.warn('🚨 ALERTA: Intento de escalada de privilegios BLOQUEADO.');
-                // Opción A: Lanzar error (Recomendado para testing)
-                throw new ForbiddenException('No tienes poder aquí. No puedes crear Super Admins.');
-
-                // Opción B: Silenciarlo (Forzar a false)
-                // createDto.is_super_admin = false;
-            }
-        }
 
         // 🔒 BLINDAJE NIVEL 2: Roles Prohibidos
         // A veces el usuario no manda el flag booleano, pero se asigna el ROL "Super Admin"
@@ -126,15 +105,36 @@ export class UsersService {
         });
     }
 
-    async getRoles(tenantId: string, currentUser: any) {
+async getRoles(tenantId: string, currentUser: any) {
+        // 1. Logs de Detective 🕵️‍♂️ (MIRA TU CONSOLA AL EJECUTAR ESTO)
+        console.log("🔍 --- DEBUG ROLES ---");
+        console.log("👤 Usuario:", currentUser.email);
+        console.log("👑 ¿Es Super Admin?:", currentUser.is_super_admin); // <--- ESTO ES CRÍTICO
+
         const roles = await this.roleRepo.find({
-            where: { tenant: { id: tenantId } },
+            where: [
+                { tenant: { id: tenantId } },
+                { tenant: IsNull() }
+            ],
             select: ['id', 'name'],
             order: { name: 'ASC' }
         });
+
+        console.log("📋 Roles en DB:", roles.map(r => r.name));
+
+        // 2. Si el usuario NO es Super Admin (o el flag es falso/null)
         if (!currentUser.is_super_admin) {
-            return roles.filter(role => role.name !== 'Super Admin');
+            console.log("🛡️ Aplicando filtro de seguridad...");
+            
+            // 3. LA OPCIÓN NUCLEAR: Filtro insensible a mayúsculas/espacios
+            // Borra cualquier cosa que se parezca a "super admin"
+            return roles.filter(role => {
+                const name = role.name.toLowerCase().replace('_', ' ').trim();
+                return !name.includes('super admin'); 
+            });
         }
+
+        return roles;
     }
 
     // 5. UPDATE

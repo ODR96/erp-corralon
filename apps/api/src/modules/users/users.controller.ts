@@ -12,7 +12,7 @@ export class UsersController {
     constructor(private readonly usersService: UsersService) { }
 
     @Post()
-    @RequirePermissions('users.create')
+    @RequirePermissions('users.manage')
     create(@Body() createUserDto: CreateUserDto, @Request() req: any) {
         // FIX ERROR 1: Pasamos el rol del que pide (req.user.role)
         return this.usersService.create(createUserDto, req.user.tenantId, req.user);
@@ -33,14 +33,14 @@ export class UsersController {
     }
 
     @Get('roles')
-    @RequirePermissions('users.view', 'users.create')
+    @RequirePermissions('users.view', 'users.manage')
     getRoles(@Request() req: any) {
         return this.usersService.getRoles(req.user.tenant.id, req.user);
     }
 
     // 👇 Endpoint para el dropdown de sucursales (Sin cambios, pero asegúrate que exista en el servicio)
     @Get('branches')
-    @RequirePermissions('users.view', 'users.create')
+    @RequirePermissions('users.view', 'users.manage')
     getBranches(@Request() req: any) {
         return this.usersService.getBranches(req.user.tenant.id);
     }
@@ -53,13 +53,13 @@ export class UsersController {
     }
 
     @Patch(':id')
-    @RequirePermissions('users.create')
+    @RequirePermissions('users.manage')
     update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
         return this.usersService.update(id, updateUserDto);
     }
 
     @Delete(':id')
-    @RequirePermissions('users.create')
+    @RequirePermissions('users.manage')
     remove(
         @Param('id') id: string,
         @Query('hard') hard: string,
@@ -71,7 +71,7 @@ export class UsersController {
     }
 
     @Patch(':id/restore')
-    @RequirePermissions('users.create')
+    @RequirePermissions('users.manage')
     restore(@Param('id') id: string) {
         return this.usersService.restore(id);
     }

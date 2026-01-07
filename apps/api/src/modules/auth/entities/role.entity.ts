@@ -10,6 +10,9 @@ export class Role {
     @Column('text')
     name: string; // Ej: "Vendedor", "Admin"
 
+    @Column({ type: 'text', nullable: true })
+    description: string;
+
     @ManyToOne(() => Tenant)
     @JoinColumn({ name: 'tenant_id' })
     tenant: Tenant;

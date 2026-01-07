@@ -36,7 +36,7 @@ export class ClientsController {
     }
 
     @Patch(':id')
-    @RequirePermissions('sales.edit')
+    @RequirePermissions('sales.create')
     update(@Param('id') id: string, @Body() updateDto: UpdateClientDto, @Request() req: any) {
         return this.clientsService.update(id, updateDto, req.user.tenant.id);
     }

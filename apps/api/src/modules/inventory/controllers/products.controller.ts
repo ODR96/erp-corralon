@@ -16,7 +16,7 @@ export class ProductsController {
     constructor(private readonly productsService: ProductsService) { }
 
     @Post()
-    @RequirePermissions('products.manage') // Solo quien tenga permiso puede crear
+    @RequirePermissions('inventory.manage') // Solo quien tenga permiso puede crear
     create(@Body() createProductDto: CreateProductDto, @Request() req: any) {
         // 👇 FIX CRÍTICO: Usamos req.user.tenant.id en lugar de req.user.tenantId
         const tenantId = req.user.tenant?.id;
@@ -24,7 +24,7 @@ export class ProductsController {
     }
 
     @Get()
-    // @RequirePermissions('stock.view') // Opcional: Podrías pedir permiso para ver
+    @RequirePermissions('inventory.view')
     findAll(
         @Query('page') page: string,
         @Query('limit') limit: string,
@@ -51,7 +51,7 @@ export class ProductsController {
     }
 
     @Get('export/excel')
-    @RequirePermissions('products.manage')
+    @RequirePermissions('inventory.manage')
     async export(@Request() req: any, @Res() res: Response) {
         const tenantId = req.user.tenant?.id;
         return this.productsService.exportToExcel(tenantId, res);
@@ -97,25 +97,23 @@ export class ProductsController {
     @Get(':id')
     //@RequirePermissions('products.list') // Comenta esto temporalmente para descartar permisos
     findOne(@Param('id') id: string, @Request() req: any) {
-        console.log("📢 PETICIÓN RECIBIDA para ID:", id); // <--- AGREGA ESTO
-        console.log("🏢 Tenant ID:", req.user.tenantId);   // <--- AGREGA ESTO
         return this.productsService.findOne(id, req.user.tenantId);
     }
 
     @Patch(':id')
-    @RequirePermissions('products.manage')
+    @RequirePermissions('inventory.manage')
     update(@Param('id') id: string, @Body() updateProductDto: UpdateProductDto) {
         return this.productsService.update(id, updateProductDto);
     }
 
     @Delete(':id')
-    @RequirePermissions('products.manage')
+    @RequirePermissions('inentory.manage')
     remove(@Param('id') id: string, @Query('hardDelete') hardDelete: string) {
         return this.productsService.remove(id, hardDelete === 'true');
     }
 
     @Patch(':id/restore')
-    @RequirePermissions('products.manage')
+    @RequirePermissions('inventory.manage')
     restore(@Param('id') id: string) {
         return this.productsService.restore(id);
     }

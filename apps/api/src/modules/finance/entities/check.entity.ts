@@ -24,6 +24,9 @@ export class Check {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 
+    @Column({ type: 'text', nullable: true })
+        description: string;
+
     @Column({ unique: true }) // Ojo: unique true puede molestar si manejas varios bancos con misma numeración, evaluar cambiar a unique compuesto (number + bank_name)
     number: string;
 

@@ -11,7 +11,7 @@ export class BranchesController {
     constructor(private readonly branchesService: BranchesService) { }
 
     @Get()
-    @RequirePermissions('branches.manage')
+    @RequirePermissions('branches.manage', 'branches.view')
     findAll(
         @Request() req: any,
         @Query('withDeleted') withDeleted: string,

@@ -12,13 +12,13 @@ export class ProvidersController {
     constructor(private readonly providersService: ProvidersService) { }
 
     @Post()
-    @RequirePermissions('products.manage')
+    @RequirePermissions('providers.manage')
     create(@Body() createDto: CreateProviderDto, @Request() req: any) {
         return this.providersService.create(createDto, req.user.tenant.id);
     }
 
     @Get()
-    @RequirePermissions('products.manage', 'stock.view')
+    @RequirePermissions('providers.manage', 'providers.view')
     findAll(
         @Query('page') page: number = 1,
         @Query('limit') limit: number = 10,
@@ -31,19 +31,19 @@ export class ProvidersController {
     }
 
     @Get(':id')
-    @RequirePermissions('products.manage')
+    @RequirePermissions('providers.manage')
     findOne(@Param('id') id: string) {
         return this.providersService.findOne(id);
     }
 
     @Patch(':id')
-    @RequirePermissions('products.manage')
+    @RequirePermissions('providers.manage')
     update(@Param('id') id: string, @Body() updateDto: UpdateProviderDto) {
         return this.providersService.update(id, updateDto);
     }
 
     @Delete(':id')
-    @RequirePermissions('products.manage')
+    @RequirePermissions('providers.manage')
     remove(
         @Param('id') id: string,
         @Query('hard') hard: string = 'false' // <--- Recibe el param hard
@@ -53,7 +53,7 @@ export class ProvidersController {
 
     // 👇 NUEVO ENDPOINT: Restaurar
     @Patch(':id/restore')
-    @RequirePermissions('products.manage')
+    @RequirePermissions('providers.manage')
     restore(@Param('id') id: string) {
         return this.providersService.restore(id);
     }

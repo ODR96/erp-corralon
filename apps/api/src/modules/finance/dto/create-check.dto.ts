@@ -56,4 +56,8 @@ export class CreateCheckDto {
     @IsString()
     @IsOptional()
     observation?: string;
+
+    @IsString()
+    @IsOptional()
+    description?: string;
 }

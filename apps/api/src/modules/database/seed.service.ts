@@ -46,32 +46,6 @@ export class SeedService implements OnModuleInit {
             ]);
         }
 
-        // 2. PERMISOS (Vital: Verificamos uno por uno para agregar los nuevos)
-        this.logger.log('🔐 Verificando Permisos...');
-        const permissionsDef = [
-            { slug: 'users.create', description: 'Crear usuarios' },
-            { slug: 'users.view', description: 'Ver usuarios' },
-            { slug: 'sales.create', description: 'Crear ventas' },
-            // 👇 LOS NUEVOS PERMISOS PARA STOCK 👇
-            { slug: 'stock.view', description: 'Ver stock en sucursales' },
-            { slug: 'stock.adjust', description: 'Ajustar stock manualmente' }, // Solo para Admin/Manager
-            { slug: 'products.manage', description: 'Gestionar productos' },
-            { slug: 'branches.manage', description: 'Gestionar Sucursales' },
-            { slug: 'settings.manage', description: 'Gestionar Configuración' },
-        ];
-
-        // Guardamos los permisos en un mapa para usarlos rápido después
-        const permsMap = new Map<string, Permission>();
-
-        for (const p of permissionsDef) {
-            let perm = await this.permRepo.findOneBy({ slug: p.slug });
-            if (!perm) {
-                perm = await this.permRepo.save(this.permRepo.create(p));
-                this.logger.log(`➕ Permiso creado: ${p.slug}`);
-            }
-            permsMap.set(p.slug, perm);
-        }
-
         // 3. TENANT (EMPRESA)
         let tenant = await this.tenantRepo.findOne({ where: { slug: 'corralon-demo' } });
 
@@ -95,47 +69,6 @@ export class SeedService implements OnModuleInit {
                 phone: '555-0000',
                 tenant: tenant,
             }));
-        }
-
-        // 5. ROLES (Aquí actualizamos los roles existentes con los nuevos permisos)
-        this.logger.log('👮 Actualizando Roles...');
-
-        // Definimos qué permisos lleva cada rol
-        const rolesConfig = [
-            {
-                name: 'Super Admin',
-                // Lleva TODOS los permisos
-                perms: ['users.create', 'users.view', 'sales.create', 'stock.view', 'stock.adjust', 'products.manage', 'brances.manage', 'settings.manage']
-            },
-            {
-                name: 'Admin',
-                // Lleva TODOS los permisos
-                perms: ['users.create', 'users.view', 'sales.create', 'stock.view', 'stock.adjust', 'products.manage', 'branches.manage', 'settings.manage']
-            },
-            {
-                name: 'Vendedor',
-                // Vendedor: Solo vende y ve stock. NO AJUSTA.
-                perms: ['sales.create', 'stock.view']
-            },
-        ];
-
-        for (const config of rolesConfig) {
-            let role = await this.roleRepo.findOne({
-                where: { name: config.name, tenant: { id: tenant.id } },
-                relations: ['permissions']
-            });
-
-            if (!role) {
-                role = this.roleRepo.create({ name: config.name, tenant: tenant, permissions: [] });
-            }
-
-            // Mapeamos los slugs a entidades de permiso reales
-            const rolePermissions = config.perms
-                .map(slug => permsMap.get(slug))
-                .filter(p => p !== undefined); // Filtramos por si alguno falló
-
-            role.permissions = rolePermissions as Permission[];
-            await this.roleRepo.save(role);
         }
 
         // 6. USUARIO ADMIN

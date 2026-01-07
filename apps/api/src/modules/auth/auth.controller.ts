@@ -1,20 +1,24 @@
-import { Controller, Post, Body, UnauthorizedException } from '@nestjs/common';
+import { Controller, Post, Body, Request, UseGuards, Get } from '@nestjs/common';
 import { AuthService } from './auth.service';
+import { LocalAuthGuard } from './guards/local-auth.guard'; // Ajusta la ruta si tus guards están en otro lado
+// Si usas el decorador @Public, descomenta la siguiente línea:
+// import { Public } from './decorators/public.decorator';
+
 
 @Controller('auth')
 export class AuthController {
     constructor(private readonly authService: AuthService) { }
 
+    // Login existente
+    @UseGuards(LocalAuthGuard)
     @Post('login')
-    async login(@Body() body: any) {
-        // Validamos usuario
-        const user = await this.authService.validateUser(body.email, body.password);
+    async login(@Request() req: any) {
+        return this.authService.login(req.user);
+    }
 
-        if (!user) {
-            throw new UnauthorizedException('Credenciales inválidas');
-        }
-
-        // Si pasa, entregamos el token
-        return this.authService.login(user);
+    // 👇 Este es el endpoint nuevo para los roles
+    @Get('roles')
+    async getRoles() {
+        return this.authService.getAllRoles();
     }
 }

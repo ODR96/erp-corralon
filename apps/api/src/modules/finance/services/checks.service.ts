@@ -6,6 +6,7 @@ import { CreateCheckDto } from '../dto/create-check.dto';
 import { UpdateCheckDto } from '../dto/update-check.dto';
 import { MovementConcept, MovementType } from '../entities/current-account.entity';
 import { CurrentAccountService } from './current-account.service';
+import * as XLSX from 'xlsx';
 
 
 @Injectable()
@@ -169,5 +170,133 @@ async create(createDto: CreateCheckDto, tenantId: string, manager?: EntityManage
             },
             order: { payment_date: 'ASC' }
         });
+    }
+
+    async exportToExcel(tenantId: string) {
+        // Traemos todos los cheques (podrías reusar findAll si quisieras aplicar filtros)
+        const checks = await this.checkRepo.find({
+            where: { tenant: { id: tenantId } },
+            relations: ['client', 'provider'],
+            order: { payment_date: 'ASC' }
+        });
+
+        const data = checks.map(c => ({
+            'NRO CHEQUE': c.number,
+            'BANCO': c.bank_name,
+            'TIPO': c.type === 'OWN' ? 'PROPIO' : 'TERCERO',
+            'ESTADO': c.status,
+            'IMPORTE': Number(c.amount),
+            'F. EMISIÓN': c.issue_date,
+            'F. PAGO': c.payment_date,
+            'DESTINATARIO/EMISOR': c.type === 'OWN' ? (c.provider?.name || c.recipient_name) : (c.client?.name || c.drawer_name),
+            'CONCEPTO': c.description || ''
+        }));
+
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Cheques');
+
+        return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    }
+
+    // 2. IMPORTAR DESDE EXCEL
+async importFromExcel(file: Express.Multer.File, tenantId: string) {
+        const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        // Usamos defval: '' y raw: false para leer fechas y números como texto si hace falta
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as any[];
+
+        let created = 0;
+        let errors = 0;
+
+        // Función para parsear fechas de Excel o strings DD/MM/YYYY o YYYY-MM-DD
+        const parseDate = (val: any) => {
+            if (!val) return new Date();
+            // Caso Excel Serial (45231)
+            if (typeof val === 'number') {
+                const date = new Date(Math.round((val - 25569) * 86400 * 1000));
+                return date;
+            }
+            // Caso String
+            const str = String(val).trim();
+            // YYYY-MM-DD
+            if (str.match(/^\d{4}-\d{2}-\d{2}$/)) return new Date(str);
+            // DD/MM/YYYY
+            if (str.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) {
+                const [d, m, y] = str.split('/');
+                return new Date(`${y}-${m}-${d}`);
+            }
+            return new Date(str); // Intento final
+        };
+
+        for (const row of rows) {
+            try {
+                // 1. Detección de Columnas (Tu Formato vs Estándar)
+                const number = String(row['Nro Cheque'] || row['NRO'] || row['NUMERO'] || '').trim();
+                const amountRaw = row['Monto'] || row['IMPORTE'] || row['PRECIO'] || 0;
+                
+                // Limpieza de monto (por si viene "$ 1.500")
+                let amount = 0;
+                if (typeof amountRaw === 'number') amount = amountRaw;
+                else {
+                    const s = String(amountRaw).replace(/[^\d.,]/g, ''); // Quitamos $
+                    amount = parseFloat(s) || 0;
+                }
+
+                // Si no hay número o monto, saltamos
+                if (!number || amount <= 0) continue;
+
+                // 2. Proveedor
+                const providerNameRaw = String(row['Proveedor'] || row['DESTINATARIO'] || '').trim();
+                // Limpieza: "GUEX (20297066421)" -> "GUEX"
+                // Regex: Toma todo hasta el primer paréntesis
+                const providerName = providerNameRaw.split('(')[0].trim();
+
+                // 3. Fechas
+                const issueDate = parseDate(row['Fecha Emisión'] || row['F. EMISION'] || row['EMISION']);
+                // Si no hay fecha de emisión en el excel, asumimos 30 días antes del vencimiento o hoy
+                const paymentDateRaw = row['Fecha Vencimiento'] || row['F. VENCIMIENTO'] || row['VENCIMIENTO'] || row['PAGO'];
+                const paymentDate = parseDate(paymentDateRaw);
+
+                // 4. Estado (Mapeo de tu Excel "Pagado/Pendiente" a nuestros ENUMs)
+                const statusRaw = String(row['Estado'] || row['ESTADO'] || '').toUpperCase();
+                let status = CheckStatus.PENDING;
+                if (statusRaw.includes('PAGADO') || statusRaw.includes('COBRADO')) status = CheckStatus.PAID;
+                if (statusRaw.includes('RECHAZAD')) status = CheckStatus.REJECTED;
+                if (statusRaw.includes('ANULADO')) status = CheckStatus.VOID;
+
+                // 5. Observaciones
+                const obs = String(row['Obs'] || row['OBS'] || row['CONCEPTO'] || '');
+
+                // 6. Evitar Duplicados (Mismo número y banco)
+                // Como tu Excel no tiene Banco, asumimos 'Desconocido' o lo sacamos del proveedor
+                const bank = 'Desconocido'; 
+
+                const exists = await this.checkRepo.findOne({
+                    where: { number, tenant: { id: tenantId } }
+                });
+
+                if (!exists) {
+                    await this.checkRepo.save(this.checkRepo.create({
+                        number,
+                        bank_name: bank,
+                        amount,
+                        type: CheckType.OWN, // Asumimos que son PROPIOS si es lista de pagos
+                        status,
+                        issue_date: issueDate,
+                        payment_date: paymentDate,
+                        recipient_name: providerName, // Guardamos el nombre limpio
+                        description: obs || 'Importado de Excel histórico',
+                        tenant: { id: tenantId }
+                    }));
+                    created++;
+                }
+            } catch (e) {
+                console.error("Error importando fila", e);
+                errors++;
+            }
+        }
+
+        return { created, errors };
     }
 }
