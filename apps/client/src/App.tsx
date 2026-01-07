@@ -1,7 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { CssBaseline, Typography } from "@mui/material";
 
-// 👇 1. IMPORTAMOS NUESTRO CONTEXTO PROPIO
 import { NotificationProvider } from "./context/NotificationContext";
 
 // --- IMPORTS DE PÁGINAS ---
@@ -9,7 +8,6 @@ import { LoginPage } from "./pages/LoginPage";
 import { MainLayout } from "./components/layout/MainLayout";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 
-// import { DashboardPage } from "./pages/DashboardPage"; // (Idealmente muévelo a su propio archivo, pero si no, deja el const aquí)
 import { UsersPage } from "./pages/UsersPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { BranchesPage } from "./pages/BranchesPage";
@@ -29,73 +27,124 @@ import { POSPage } from "./pages/sales/POSPage";
 import { CashPage } from "./pages/finance/CashPage";
 import { ExpensesPage } from "./pages/finance/ExpensesPage";
 
-// Si DashboardPage es muy simple, puedes dejarlo aquí o moverlo.
 const DashboardPlaceholder = () => (
-  <Typography variant="h4">Bienvenido al Dashboard</Typography>
+  <Typography variant="h4" sx={{ p: 3 }}>
+    Bienvenido al Panel de Control
+  </Typography>
 );
 
 function App() {
   return (
     <BrowserRouter>
-      {/* 👇 2. AQUÍ ENVOLVEMOS CON NUESTRO SISTEMA DE NOTIFICACIONES */}
       <NotificationProvider>
         <CssBaseline />
 
         <Routes>
-          {/* RUTA PÚBLICA */}
+          {/* --- RUTAS PÚBLICAS (Login) --- */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
-          {/* 🔐 ZONA PRIVADA (PROTEGIDA) */}
+          {/* --- ZONA PRIVADA (Requiere Login) --- */}
           <Route element={<ProtectedRoute />}>
             <Route element={<MainLayout />}>
-              {/* DASHBOARD */}
+              {/* 1. ACCESO GENERAL (Todos los logueados ven esto) */}
               <Route path="/" element={<DashboardPlaceholder />} />
-              {/* USUARIOS & PERFIL */}
-              <Route path="/users" element={<UsersPage />} />
               <Route path="/profile" element={<ProfilePage />} />
-              {/* CONFIGURACIÓN & SUCURSALES */}
-              <Route path="/branches" element={<BranchesPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              {/* 📦 INVENTARIO */}
-              <Route path="/inventory" element={<ProductsPage />} />{" "}
-              {/* Ojo: quizás quieras cambiar la URL a /inventory/products para ser consistente */}
-              <Route path="/inventory/products" element={<ProductsPage />} />{" "}
-              {/* Agregué esta por consistencia */}
-              {/* 👥 PROVEEDORES */}
-              <Route path="/inventory/providers" element={<ProvidersPage />} />
+
+              {/* 2. VENTAS (Requiere 'sales.view' o 'sales.create') */}
               <Route
-                path="/inventory/providers/:id"
-                element={<ProviderProfilePage />}
-              />
-              <Route path="/sales/clients" element={<ClientsPage />} />
-              <Route path="/finance/checks" element={<ChecksPage />} />
+                element={<ProtectedRoute requiredPermission="sales.view" />}
+              >
+                <Route path="/sales/clients" element={<ClientsPage />} />
+                {/* POS podría requerir un permiso más fuerte como 'sales.create' */}
+                <Route path="/sales/pos" element={<POSPage />} />
+              </Route>
+
+              {/* 3. INVENTARIO (Requiere 'inventory.view') */}
               <Route
-                path="finance/account/:type/:id"
-                element={<AccountDetailsPage />}
-              />
+                element={<ProtectedRoute requiredPermission="inventory.view" />}
+              >
+                <Route path="/inventory" element={<ProductsPage />} />
+                <Route path="/inventory/products" element={<ProductsPage />} />
+                <Route
+                  path="/inventory/purchases"
+                  element={<PurchasesPage />}
+                />
+                <Route
+                  path="/inventory/purchases/:id"
+                  element={<NewPurchasePage />}
+                />
+                {/* Crear compra podría requerir 'inventory.manage' */}
+                <Route
+                  path="/inventory/purchases/new"
+                  element={<NewPurchasePage />}
+                />
+              </Route>
+
+              {/* 4. PROVEEDORES (Requiere 'providers.manage') */}
               <Route
-                path="/inventory/purchases/new"
-                element={<NewPurchasePage />}
-              />
-              <Route path="/inventory/purchases" element={<PurchasesPage />} />
+                element={
+                  <ProtectedRoute requiredPermission="providers.manage" />
+                }
+              >
+                <Route
+                  path="/inventory/providers"
+                  element={<ProvidersPage />}
+                />
+                <Route
+                  path="/inventory/providers/:id"
+                  element={<ProviderProfilePage />}
+                />
+              </Route>
+
+              {/* 5. FINANZAS (Requiere 'finance.view') */}
               <Route
-                path="/finance/payments/new"
-                element={<NewPaymentPage />}
-              />
+                element={<ProtectedRoute requiredPermission="finance.view" />}
+              >
+                <Route path="/finance/cash" element={<CashPage />} />
+                <Route path="/finance/checks" element={<ChecksPage />} />
+                <Route
+                  path="/finance/account/:type/:id"
+                  element={<AccountDetailsPage />}
+                />
+              </Route>
+
+              {/* 6. FINANZAS AVANZADAS (Requiere 'finance.manage') */}
               <Route
-                path="/inventory/purchases/:id"
-                element={<NewPurchasePage />}
-              />
-              <Route path="/finance/cash" element={<CashPage />} />
-              <Route path="/finance/expenses" element={<ExpensesPage />} />
+                element={<ProtectedRoute requiredPermission="finance.manage" />}
+              >
+                <Route path="/finance/expenses" element={<ExpensesPage />} />
+                <Route
+                  path="/finance/payments/new"
+                  element={<NewPaymentPage />}
+                />
+              </Route>
+
+              {/* 7. ADMINISTRACIÓN (Requiere 'users.view' o 'settings.view') */}
+              <Route
+                element={<ProtectedRoute requiredPermission="users.view" />}
+              >
+                <Route path="/users" element={<UsersPage />} />
+              </Route>
+
+              <Route
+                element={<ProtectedRoute requiredPermission="settings.view" />}
+              >
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/branches" element={<BranchesPage />} />
+              </Route>
+
+              {/* ADMIN GLOBAL (Multi-Tenant) */}
+              <Route
+                element={<ProtectedRoute requiredPermission="super_admin" />}
+              >
+                <Route path="/admin/tenants" element={<TenantsPage />} />
+              </Route>
             </Route>
           </Route>
 
-          {/* 404 - REDIRECCIÓN */}
+          {/* 404 - Cualquier otra cosa va al login */}
           <Route path="*" element={<Navigate to="/login" replace />} />
-          <Route path="/admin/tenants" element={<TenantsPage />} />
-          <Route path="/sales/pos" element={<POSPage />} />
         </Routes>
       </NotificationProvider>
     </BrowserRouter>

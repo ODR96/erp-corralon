@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   isBusinessDay,
   getNextBusinessDay,
@@ -33,7 +33,8 @@ import {
   CircularProgress,
   Alert,
   FormControlLabel,
-  Switch, // 👈 1. IMPORTANTE: Agregamos Alert aquí
+  Switch,
+  Stack,
 } from "@mui/material";
 import {
   Add,
@@ -41,11 +42,12 @@ import {
   AccountBalance,
   Search,
   Warning,
-  FilterList,
   AutoFixHigh,
   EventBusy,
   SyncAlt,
   AutoMode,
+  CloudUpload,
+  CloudDownload,
 } from "@mui/icons-material";
 import { financeService, inventoryService } from "../services/api";
 import { useNotification } from "../context/NotificationContext";
@@ -105,6 +107,10 @@ export const ChecksPage = () => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [selectedCheckId, setSelectedCheckId] = useState<string | null>(null);
 
+  // Importación / Exportación
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+
   // Carga inicial
   useEffect(() => {
     loadChecks();
@@ -147,11 +153,8 @@ export const ChecksPage = () => {
   const showOverdueOnly = () => {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-
-    // Forzamos una fecha de inicio antigua para asegurar que traiga todo
     setDateFrom("2020-01-01");
-    setDateTo(yesterday.toISOString().split("T")[0]); // Hasta ayer
-
+    setDateTo(yesterday.toISOString().split("T")[0]);
     showNotification(
       "Mostrando cheques vencidos (anteriores a hoy)",
       "warning"
@@ -175,6 +178,44 @@ export const ChecksPage = () => {
     }
   };
 
+  // --- IMPORTAR / EXPORTAR ---
+  const handleExport = async () => {
+    try {
+      showNotification("Generando reporte...", "info");
+      const blob = await financeService.exportChecks();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `cheques_${new Date().toISOString().split("T")[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      showNotification("Exportación exitosa", "success");
+    } catch (e) {
+      showNotification("Error al exportar", "error");
+    }
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setImporting(true);
+      try {
+        showNotification("Subiendo cheques...", "info");
+        const res = await financeService.importChecks(e.target.files[0]);
+        showNotification(
+          `Importados: ${res.created} - Errores: ${res.errors}`,
+          res.errors > 0 ? "warning" : "success"
+        );
+        loadChecks();
+      } catch (error) {
+        showNotification("Error al importar archivo", "error");
+      } finally {
+        setImporting(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    }
+  };
+
   // --- MANEJO DE ESTADO RÁPIDO ---
   const handleStatusClick = (
     event: React.MouseEvent<HTMLElement>,
@@ -186,8 +227,6 @@ export const ChecksPage = () => {
 
   const handleStatusChange = async (newStatus: string) => {
     if (!selectedCheckId) return;
-
-    // Optimistic UI
     const oldChecks = [...checks];
     setChecks((prev) =>
       prev.map((c) =>
@@ -195,12 +234,11 @@ export const ChecksPage = () => {
       )
     );
     setAnchorEl(null);
-
     try {
       await financeService.updateCheck(selectedCheckId, { status: newStatus });
       showNotification("Estado actualizado", "success");
     } catch (error) {
-      setChecks(oldChecks); // Revertimos si falló
+      setChecks(oldChecks);
       showNotification("Error al actualizar estado", "error");
     }
   };
@@ -208,9 +246,17 @@ export const ChecksPage = () => {
   // --- MODAL ---
   const handleSave = async () => {
     try {
+      const { id } = formData;
       const payload = {
-        ...formData,
+        number: formData.number,
+        bank_name: formData.bank_name,
         amount: Number(formData.amount),
+        issue_date: formData.issue_date,
+        payment_date: formData.payment_date,
+        type: formData.type,
+        status: formData.status,
+        drawer_name: formData.drawer_name,
+        // Lógica condicional de proveedor/destinatario
         provider_id:
           formData.type === "OWN" && formData.provider_id
             ? formData.provider_id
@@ -219,10 +265,13 @@ export const ChecksPage = () => {
           formData.type === "OWN" && !formData.provider_id
             ? formData.recipient_name
             : null,
+        // Campos opcionales de texto
+        observation: formData.observation,
+        description: formData.description,
       };
 
       if (isEditing) {
-        await financeService.updateCheck(formData.id, payload);
+        await financeService.updateCheck(id, payload);
         showNotification("Cheque actualizado", "success");
       } else {
         await financeService.createCheck(payload);
@@ -268,7 +317,6 @@ export const ChecksPage = () => {
     setOpen(true);
   };
 
-  // Helpers
   const formatCurrency = (val: number) =>
     new Intl.NumberFormat("es-AR", {
       style: "currency",
@@ -291,22 +339,14 @@ export const ChecksPage = () => {
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-
     const paymentDate = new Date(check.payment_date);
     paymentDate.setHours(0, 0, 0, 0);
-
-    // 💀 REGLA DE LOS 30 DÍAS (VENCIMIENTO LEGAL)
     const expirationDate = new Date(paymentDate);
     expirationDate.setDate(expirationDate.getDate() + 30);
 
-    if (today > expirationDate) {
-      return "#e1bee7";
-    }
-
-    // 🔴 ROJO
+    if (today > expirationDate) return "#e1bee7";
     if (paymentDate < today) return "#fff4e5";
 
-    // 🟡 AMARILLO
     const nextWeek = new Date(today);
     nextWeek.setDate(today.getDate() + 7);
     if (paymentDate <= nextWeek && paymentDate >= today) return "#fffde7";
@@ -315,12 +355,7 @@ export const ChecksPage = () => {
   };
 
   const findBetterDate = () => {
-    // 1. Buscar siguiente día hábil (sin feriados ni findes)
     let nextDate = getNextBusinessDay(formData.payment_date);
-
-    // 2. (Opcional) Evitar fechas repetidas
-    // Si la fecha sugerida ya tiene cheques, intentamos avanzar uno más
-    // Esto es un loop simple, se puede hacer más complejo
     let safety = 0;
     while (
       checks.some(
@@ -332,7 +367,6 @@ export const ChecksPage = () => {
       nextDate = getNextBusinessDay(nextDate);
       safety++;
     }
-
     setFormData({ ...formData, payment_date: nextDate });
     showNotification(
       `Fecha ajustada al ${getFriendlyDate(nextDate)}`,
@@ -340,9 +374,6 @@ export const ChecksPage = () => {
     );
   };
 
-  // 👇 2. CÁLCULO DE ALERTA DE FECHA (Lógica Nueva)
-  // Filtramos los cheques que coinciden en fecha con lo que estás escribiendo
-  // Excluimos el cheque actual si estamos editando (para no contarse a sí mismo)
   const checksOnSameDay = checks.filter(
     (c) =>
       c.payment_date?.split("T")[0] === formData.payment_date &&
@@ -352,9 +383,45 @@ export const ChecksPage = () => {
 
   return (
     <Box p={3}>
-      <Typography variant="h4" fontWeight="bold" gutterBottom color="primary">
-        🏦 Gestión de Cheques
-      </Typography>
+      <Stack
+        direction="row"
+        justifyContent="space-between"
+        alignItems="center"
+        mb={2}
+      >
+        <Typography variant="h4" fontWeight="bold" color="primary">
+          🏦 Gestión de Cheques
+        </Typography>
+        <Box display="flex" gap={2}>
+          <Button
+            variant="outlined"
+            startIcon={<CloudDownload />}
+            onClick={handleExport}
+            size="small"
+          >
+            Exportar
+          </Button>
+
+          <Button
+            variant="outlined"
+            startIcon={
+              importing ? <CircularProgress size={20} /> : <CloudUpload />
+            }
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            size="small"
+          >
+            {importing ? "Subiendo..." : "Importar"}
+          </Button>
+          <input
+            type="file"
+            hidden
+            ref={fileInputRef}
+            accept=".xlsx, .xls"
+            onChange={handleImportFile}
+          />
+        </Box>
+      </Stack>
 
       <Paper sx={{ mb: 2 }}>
         <Tabs
@@ -372,9 +439,8 @@ export const ChecksPage = () => {
         </Tabs>
       </Paper>
 
-      {/* BARRA DE FILTROS AVANZADA */}
+      {/* BARRA DE FILTROS */}
       <Paper sx={{ p: 2, mb: 2 }}>
-        {/* FILA 1: Búsqueda y Filtros Principales */}
         <Box display="flex" gap={2} alignItems="center" flexWrap="wrap" mb={2}>
           <TextField
             size="small"
@@ -418,7 +484,6 @@ export const ChecksPage = () => {
           </TextField>
         </Box>
 
-        {/* FILA 2: Fechas y Botones de Acción */}
         <Box display="flex" gap={2} alignItems="center" flexWrap="wrap">
           <TextField
             label="Desde"
@@ -428,7 +493,7 @@ export const ChecksPage = () => {
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
           />
-          <Tooltip title="Ver solo este día (Copiar fecha)">
+          <Tooltip title="Ver solo este día">
             <IconButton
               size="small"
               onClick={() => setDateTo(dateFrom)}
@@ -449,21 +514,21 @@ export const ChecksPage = () => {
             variant="text"
             color="primary"
             size="small"
-            startIcon={<AutoMode />} // Icono de rayito/automático
+            startIcon={<AutoMode />}
             onClick={() => setOpenGenerator(true)}
           >
             Generar Tanda
           </Button>
-          <Box flexGrow={1} /> {/* Espaciador */}
+          <Box flexGrow={1} />
           <FormControlLabel
             control={
               <Switch
-                checked={!hideFinalized} // Invertimos lógica visual: Check = Ver Historial
+                checked={!hideFinalized}
                 onChange={(e) => setHideFinalized(!e.target.checked)}
                 color="primary"
               />
             }
-            label="Ver Historial (Pagados/Anulados)"
+            label="Ver Historial"
             sx={{ mr: 2, color: "text.secondary" }}
           />
           <Button
@@ -527,12 +592,10 @@ export const ChecksPage = () => {
             {checks.map((c) => {
               const rowColor = getRowColor(c);
               const statusInfo = getStatusInfo(c.status);
-
               const isOverdue =
                 tabValue === "OWN" &&
                 c.status !== "PAID" &&
                 new Date(c.payment_date) < new Date();
-
               const paymentDate = new Date(c.payment_date);
               const legalLimit = new Date(paymentDate);
               legalLimit.setDate(legalLimit.getDate() + 30);
@@ -551,22 +614,18 @@ export const ChecksPage = () => {
                       <Typography variant="caption">#{c.number}</Typography>
                     </Box>
                   </TableCell>
-
-                  {/* TOOLTIP EN LA FECHA */}
                   <TableCell>
                     <Box display="flex" alignItems="center" gap={1}>
                       {isExpiredLegal && (
-                        <Tooltip title="⚠️ CADUCADO: Pasaron más de 30 días del vencimiento">
+                        <Tooltip title="⚠️ CADUCADO: Pasaron más de 30 días">
                           <Warning sx={{ color: "#9c27b0" }} fontSize="small" />
                         </Tooltip>
                       )}
-
                       {isOverdue && !isExpiredLegal && (
                         <Tooltip title="Vencido / Pendiente de Débito">
                           <Warning color="error" fontSize="small" />
                         </Tooltip>
                       )}
-
                       <Typography
                         variant="body2"
                         fontWeight="bold"
@@ -576,7 +635,6 @@ export const ChecksPage = () => {
                       </Typography>
                     </Box>
                   </TableCell>
-
                   <TableCell>
                     {tabValue === "THIRD_PARTY" ? (
                       c.drawer_name
@@ -635,21 +693,16 @@ export const ChecksPage = () => {
         />
       </TableContainer>
 
-      {/* MENÚ FLOTANTE DE ESTADOS */}
       <Menu
         anchorEl={anchorEl}
         open={Boolean(anchorEl)}
         onClose={() => setAnchorEl(null)}
       >
-        {/* --- CICLO DE VIDA: CHEQUES DE TERCEROS (ENTRADAS) --- */}
         {tabValue === "THIRD_PARTY" &&
           selectedCheckId &&
           (() => {
-            // Buscamos el cheque seleccionado en el array para saber su estado actual
             const currentCheck = checks.find((c) => c.id === selectedCheckId);
             if (!currentCheck) return null;
-
-            // 1. ESTÁ EN CARTERA -> DEPOSITAR O RECHAZAR O USAR
             if (currentCheck.status === "PENDING")
               return [
                 <MenuItem
@@ -661,7 +714,7 @@ export const ChecksPage = () => {
                 </MenuItem>,
                 <MenuItem key="used" onClick={() => handleStatusChange("USED")}>
                   <SyncAlt sx={{ mr: 2, color: "text.secondary" }} /> Marcar
-                  como Entregado (Manual)
+                  como Entregado
                 </MenuItem>,
                 <MenuItem
                   key="rej"
@@ -671,13 +724,11 @@ export const ChecksPage = () => {
                   Rechazado
                 </MenuItem>,
               ];
-
-            // 2. ESTÁ DEPOSITADO -> CONFIRMAR O REBOTAR
             if (currentCheck.status === "DEPOSITED")
               return [
                 <MenuItem key="paid" onClick={() => handleStatusChange("PAID")}>
                   <AutoFixHigh sx={{ mr: 2, color: "success.main" }} />{" "}
-                  Confirmar Acreditación (Cobrado)
+                  Confirmar Acreditación
                 </MenuItem>,
                 <MenuItem
                   key="rej_bank"
@@ -687,29 +738,23 @@ export const ChecksPage = () => {
                   Banco
                 </MenuItem>,
               ];
-
-            // 3. ESTÁ RECHAZADO -> VOLVER A CARTERA (Gestiòn de cobro)
             if (currentCheck.status === "REJECTED")
               return [
                 <MenuItem
                   key="pend"
                   onClick={() => handleStatusChange("PENDING")}
                 >
-                  <SyncAlt sx={{ mr: 2 }} /> Volver a Cartera (Re-negociar)
+                  <SyncAlt sx={{ mr: 2 }} /> Volver a Cartera
                 </MenuItem>,
               ];
-
             return null;
           })()}
 
-        {/* --- CICLO DE VIDA: CHEQUES PROPIOS (SALIDAS) --- */}
         {tabValue === "OWN" &&
           selectedCheckId &&
           (() => {
             const currentCheck = checks.find((c) => c.id === selectedCheckId);
             if (!currentCheck) return null;
-
-            // 1. EMITIDO -> CONFIRMAR DÉBITO O ANULAR
             if (currentCheck.status === "PENDING")
               return [
                 <MenuItem
@@ -717,18 +762,16 @@ export const ChecksPage = () => {
                   onClick={() => handleStatusChange("PAID")}
                 >
                   <AutoFixHigh sx={{ mr: 2, color: "success.main" }} />{" "}
-                  Confirmar Débito en Cuenta
+                  Confirmar Débito
                 </MenuItem>,
                 <MenuItem key="void" onClick={() => handleStatusChange("VOID")}>
                   <EventBusy sx={{ mr: 2, color: "error.main" }} /> Anular
                   Cheque
                 </MenuItem>,
               ];
-
             return null;
           })()}
 
-        {/* SIEMPRE DISPONIBLE: OPCIÓN DE CORRECCIÓN (Ver todos) */}
         <MenuItem disabled>
           <Typography variant="caption">--- Corrección Manual ---</Typography>
         </MenuItem>
@@ -748,7 +791,6 @@ export const ChecksPage = () => {
         ))}
       </Menu>
 
-      {/* MODAL EDICIÓN COMPLETA */}
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
@@ -763,7 +805,6 @@ export const ChecksPage = () => {
             : "Ingresar Cheque"}
         </DialogTitle>
         <DialogContent dividers>
-          {/* 👇 3. AQUÍ ESTÁ LA ALERTA VISUAL */}
           {checksOnSameDay > 0 && (
             <Alert severity="warning" sx={{ mb: 2 }}>
               ⚠️ Atención: Ya tienes{" "}
@@ -774,7 +815,6 @@ export const ChecksPage = () => {
               {formatDate(formData.payment_date)}.
             </Alert>
           )}
-
           <Grid container spacing={2}>
             <Grid item xs={12} md={6}>
               <Autocomplete
@@ -811,11 +851,9 @@ export const ChecksPage = () => {
                 }
               />
             </Grid>
-
-            {/* INPUT DE FECHA DE COBRO MEJORADO */}
             <Grid item xs={6}>
               <TextField
-                label={`F. Cobro (${getFriendlyDate(formData.payment_date)})`} // Muestra qué día cae (Lun/Mar/etc)
+                label={`F. Cobro (${getFriendlyDate(formData.payment_date)})`}
                 type="date"
                 fullWidth
                 InputLabelProps={{ shrink: true }}
@@ -823,15 +861,14 @@ export const ChecksPage = () => {
                 onChange={(e) =>
                   setFormData({ ...formData, payment_date: e.target.value })
                 }
-                error={!dateValidation.valid} // Se pone rojo si es feriado
+                error={!dateValidation.valid}
               />
-              {/* Botón rápido debajo del input */}
               <Button
                 size="small"
                 startIcon={<AutoFixHigh />}
                 onClick={findBetterDate}
                 sx={{ mt: 0.5, textTransform: "none" }}
-                disabled={checksOnSameDay === 0 && dateValidation.valid} // Se deshabilita si la fecha es perfecta
+                disabled={checksOnSameDay === 0 && dateValidation.valid}
               >
                 Sugerir mejor fecha
               </Button>
@@ -864,7 +901,6 @@ export const ChecksPage = () => {
                 ))}
               </TextField>
             </Grid>
-
             {formData.type === "THIRD_PARTY" ? (
               <Grid item xs={12}>
                 <TextField
@@ -929,7 +965,7 @@ export const ChecksPage = () => {
       <BatchChecksDialog
         open={openGenerator}
         onClose={() => setOpenGenerator(false)}
-        onSuccess={loadChecks} // Recarga la tabla al terminar
+        onSuccess={loadChecks}
       />
     </Box>
   );

@@ -33,9 +33,8 @@ import {
   Delete,
   Security,
   Search,
-  Store,
   RestoreFromTrash,
-  DeleteForever, // <--- Iconos nuevos
+  DeleteForever,
 } from "@mui/icons-material";
 import { usersService } from "../services/api";
 import { useNotification } from "../context/NotificationContext";
@@ -79,7 +78,10 @@ export const UsersPage = () => {
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [search, setSearch] = useState(""); // El valor real para la API
 
-  // Cargar datos cuando cambia el switch 'showDeleted'
+  // 1. RECUPERAR USUARIO ACTUAL DEL LOCALSTORAGE
+  const userString = localStorage.getItem("user");
+  const currentUser = userString ? JSON.parse(userString) : null;
+
   // Cargar datos cuando cambie: página, límite, búsqueda o filtro de borrados
   useEffect(() => {
     loadData();
@@ -95,7 +97,7 @@ export const UsersPage = () => {
         search
       );
       const rolesData = await usersService.getRoles();
-      const branchesData = await usersService.getBranches(); // Si ya tienes esto
+      const branchesData = await usersService.getBranches();
 
       setUsers(usersResponse.data); // Los usuarios de esta página
       setTotal(usersResponse.total); // El número total en la base de datos
@@ -120,21 +122,15 @@ export const UsersPage = () => {
     setPage(0); // Volver a la primera página
   };
 
-  // Manejador del Buscador (Con un pequeño delay o directo)
+  // Manejador del Buscador
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(e.target.value);
     setPage(0); // Resetear a pág 1 al buscar
   };
 
-  const filteredUsers = users.filter(
-    (user) =>
-      user.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  // ... (handleOpenCreate, handleOpenEdit, handleClose, validateForm, handleSubmit siguen IGUAL) ...
-  // Por brevedad, asumo que mantienes esas funciones del código anterior.
-  // Si las necesitas completas avísame, pero solo cambia el handleDelete y agregamos handleRestore.
+  // (Nota: 'filteredUsers' ya no se usa porque filtras desde el backend con 'search',
+  // pero lo dejo comentado por si lo usabas para algo local)
+  // const filteredUsers = users.filter(...)
 
   const handleOpenCreate = () => {
     setFormData(initialFormState);
@@ -162,7 +158,6 @@ export const UsersPage = () => {
   const handleClose = () => setOpen(false);
 
   const validateForm = () => {
-    /* ... Código anterior ... */
     const errors: { [key: string]: string } = {};
     if (!formData.full_name) errors.full_name = "El nombre es requerido";
     if (!formData.email) errors.email = "El email es requerido";
@@ -180,9 +175,8 @@ export const UsersPage = () => {
     if (!validateForm()) return;
     try {
       if (isEditing && formData.id) {
-        // --- CORRECCIÓN AQUÍ ---
-        const updatePayload: any = { ...formData }; // Copiamos los datos
-        delete updatePayload.id; // <--- BORRAMOS EL ID para que el backend no se queje
+        const updatePayload: any = { ...formData };
+        delete updatePayload.id;
 
         if (!updatePayload.password) delete updatePayload.password;
 
@@ -202,8 +196,6 @@ export const UsersPage = () => {
     }
   };
 
-  // --- NUEVAS FUNCIONES DE ACCIÓN ---
-
   const handleDelete = async (id: string, isAlreadyDeleted: boolean) => {
     const confirmMessage = isAlreadyDeleted
       ? "¿ESTÁ SEGURO? Se eliminará DEFINITIVAMENTE y no podrá recuperarse."
@@ -211,7 +203,6 @@ export const UsersPage = () => {
 
     if (window.confirm(confirmMessage)) {
       try {
-        // Si ya estaba borrado, hacemos hard delete (true). Si no, soft delete (false).
         await usersService.delete(id, isAlreadyDeleted);
         showNotification(
           isAlreadyDeleted ? "Usuario destruido" : "Usuario enviado a papelera",
@@ -233,6 +224,13 @@ export const UsersPage = () => {
       showNotification("Error al restaurar", "error");
     }
   };
+
+  // 2. FILTRAR ROLES DISPONIBLES
+  // Si currentUser es super_admin, ve todos. Si no, ocultamos "Super Admin".
+  const availableRoles = roles.filter((role) => {
+    if (currentUser?.super_admin) return true;
+    return role.name !== "Super Admin";
+  });
 
   return (
     <Box>
@@ -271,7 +269,7 @@ export const UsersPage = () => {
           fullWidth
           variant="outlined"
           placeholder="Buscar por nombre..."
-          value={search} // Ahora está conectado al estado que dispara el useEffect
+          value={search}
           onChange={handleSearchChange}
           InputProps={{
             startAdornment: (
@@ -298,10 +296,8 @@ export const UsersPage = () => {
           <TableBody>
             {users.length > 0 ? (
               users.map((user) => {
-                // <--- ABRIMOS LLAVE
                 const isDeleted = !!user.deleted_at;
                 return (
-                  // <--- ABRIMOS PARÉNTESIS DEL RETURN
                   <TableRow
                     key={user.id}
                     sx={{ bgcolor: isDeleted ? "#fff4f4" : "inherit" }}
@@ -377,8 +373,8 @@ export const UsersPage = () => {
                       )}
                     </TableCell>
                   </TableRow>
-                ); // <--- CERRAMOS PARÉNTESIS DEL RETURN
-              }) // <--- CERRAMOS LLAVE DE LA FUNCIÓN
+                );
+              })
             ) : (
               <TableRow>
                 <TableCell colSpan={5} align="center">
@@ -392,7 +388,7 @@ export const UsersPage = () => {
         <TablePagination
           rowsPerPageOptions={[5, 10, 25]}
           component="div"
-          count={total} // El total real de la base de datos
+          count={total}
           rowsPerPage={rowsPerPage}
           page={page}
           onPageChange={handleChangePage}
@@ -401,7 +397,7 @@ export const UsersPage = () => {
         />
       </TableContainer>
 
-      {/* MODAL (Reutilizar el mismo código del <Dialog> anterior, no cambió nada) */}
+      {/* MODAL */}
       <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
         <form onSubmit={handleSubmit}>
           <DialogTitle>
@@ -444,8 +440,9 @@ export const UsersPage = () => {
                     setFormData({ ...formData, roleId: e.target.value })
                   }
                 >
-                  {Array.isArray(roles) &&
-                    roles.map((role) => (
+                  {/* AQUÍ USAMOS LA LISTA FILTRADA (availableRoles) */}
+                  {Array.isArray(availableRoles) &&
+                    availableRoles.map((role) => (
                       <MenuItem key={role.id} value={role.id}>
                         {role.name}
                       </MenuItem>

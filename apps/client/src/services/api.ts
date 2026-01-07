@@ -81,7 +81,8 @@ export const usersService = {
     // NUEVOS MÉTODOS
     getRoles: async () => {
         const token = localStorage.getItem('token');
-        const response = await api.get('/users/roles', { headers: { Authorization: `Bearer ${token}` } });
+        // 👇 CORREGIDO: Apunta al AuthController donde creamos el método
+        const response = await api.get('/auth/roles', { headers: { Authorization: `Bearer ${token}` } });
         return response.data;
     },
 
@@ -297,6 +298,49 @@ export const inventoryService = {
     updatePurchase: async (id: string, data: any) => {
         const response = await api.patch(`/inventory/purchases/${id}`, data);
         return response.data;
+    },
+
+    exportProducts: async () => {
+        const token = localStorage.getItem('token');
+        const response = await api.get('/inventory/products/export/excel', {
+            headers: { Authorization: `Bearer ${token}` },
+            responseType: 'blob', // <--- CLAVE: Importante para descargar archivos binarios
+        });
+        return response.data;
+    },
+
+    // 2. Importar (Subir Excel)
+    analyzeImportFile: async (file: File) => {
+        const token = localStorage.getItem('token');
+        const formData = new FormData();
+        formData.append('file', file);
+        const response = await api.post('/inventory/products/import/analyze', formData, {
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' },
+        });
+        return response.data; // Retorna { headers: [], headerRowIndex: 0 }
+    },
+
+    // 2. Importar con mapa
+    importProducts: async (file: File, providerId?: string, columnMap?: any, defaults?: any) => {
+        const token = localStorage.getItem('token');
+        const formData = new FormData();
+        formData.append('file', file);
+        if (providerId) formData.append('provider_id', providerId);
+        if (columnMap) formData.append('column_map', JSON.stringify(columnMap));
+
+
+        // Enviamos los defaults si existen
+        if (defaults?.categoryId) formData.append('default_category_id', defaults.categoryId);
+        if (defaults?.unitId) formData.append('default_unit_id', defaults.unitId);
+        if (defaults?.margin) formData.append('default_margin', defaults.margin);
+        if (defaults?.vat) formData.append('default_vat', defaults.vat);
+        if (defaults?.discount) formData.append('default_discount', defaults.discount);
+        if (defaults?.skuPrefix) formData.append('sku_prefix', defaults.skuPrefix); // 👈 AGREGAR
+
+        const response = await api.post('/inventory/products/import/excel', formData, {
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' },
+        });
+        return response.data;
     }
 };
 
@@ -327,12 +371,12 @@ export const salesService = {
     },
 
     create: async (data: any) => (await api.post('/sales', data)).data,
-    
+
     getAll: async (type?: string) => { // type = 'PRESUPUESTO' | 'VENTA'
         const response = await api.get('/sales', { params: { type } });
         return response.data;
     },
-    
+
     getById: async (id: string) => (await api.get(`/sales/${id}`)).data,
 };
 
@@ -357,6 +401,30 @@ export const integrationService = {
 };
 
 export const financeService = {
+
+    exportChecks: async () => {
+        const token = localStorage.getItem("token");
+        const response = await api.get("/finance/checks/export/excel", {
+            headers: { Authorization: `Bearer ${token}` },
+            responseType: "blob", // Importante para descargar archivos
+        });
+        return response.data;
+    },
+
+    importChecks: async (file: File) => {
+        const token = localStorage.getItem("token");
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const response = await api.post("/finance/checks/import/excel", formData, {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "multipart/form-data",
+            },
+        });
+        return response.data;
+    },
+
     getChecks: async (page = 1, limit = 10, search = '', type = '', status = '', providerId = '', dateFrom = '', dateTo = '', hideFinalized = true) => {
         const params: any = { page, limit, search, type, status, providerId, dateFrom, dateTo, hideFinalized };
         if (type) params.type = type;
@@ -423,7 +491,7 @@ export const financeService = {
         open: async (data: { opening_balance: number; notes?: string }) => (await api.post('/finance/cash/open', data)).data,
         close: async (data: { closing_balance: number; notes?: string }) => (await api.post('/finance/cash/close', data)).data,
         getMovements: async () => (await api.get('/finance/cash/movements')).data,
-        addManualMovement: async (data: { type: 'IN' | 'OUT'; concept: string; amount: number; description: string }) => 
+        addManualMovement: async (data: { type: 'IN' | 'OUT'; concept: string; amount: number; description: string }) =>
             (await api.post('/finance/cash/movement', data)).data
     },
 

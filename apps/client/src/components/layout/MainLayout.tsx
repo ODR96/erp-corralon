@@ -16,7 +16,6 @@ import {
   Menu,
   MenuItem,
   Collapse,
-  Chip,
   Badge,
 } from "@mui/material";
 import {
@@ -33,38 +32,52 @@ import {
   ExpandLess,
   ExpandMore,
   AttachMoney,
-  ReceiptLong,
   Output,
-  LocalShipping,
   RemoveCircle,
 } from "@mui/icons-material";
 import { financeService } from "../../services/api";
 
-const drawerWidth = 260; // Un poco más ancho para que se lean bien los submenús
+const drawerWidth = 260;
 
 export const MainLayout = () => {
   const navigate = useNavigate();
-  const location = useLocation(); // Para saber dónde estamos parados
+  const location = useLocation();
   const [alertCount, setAlertCount] = useState(0);
 
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
 
-  // Estado para controlar qué menús están abiertos
   const [openMenus, setOpenMenus] = useState<{ [key: string]: boolean }>({
-    finance: true, // Finanzas abierto por defecto (opcional)
+    finance: true,
     inventory: false,
     sales: false,
   });
 
+  // 👇 LÓGICA DE PERMISOS
+  const userString = localStorage.getItem("user");
+  const user = userString ? JSON.parse(userString) : null;
+
+  const hasPermission = (requiredSlug?: string) => {
+    if (!user) return false;
+    if (!requiredSlug) return true; // Público
+    // Si es Super Admin, ve todo (o si tiene rol SUPER_ADMIN)
+    if (user.is_super_admin || user.role?.name === "SUPER_ADMIN") return true;
+
+    const myPermissions = user.role?.permissions || [];
+    return myPermissions.some((p: any) => p.slug === requiredSlug);
+  };
+  // -----------------------
+
   useEffect(() => {
-    checkAlerts();
+    // Solo chequeamos alertas si tiene permiso de finanzas
+    if (hasPermission("finance.view")) {
+      checkAlerts();
+    }
   }, []);
 
   const checkAlerts = async () => {
     try {
-      // Asumiendo que agregaste getUpcomingChecks a financeService
-      const res = await financeService.getUpcomingChecks(); // Debe devolver array
+      const res = await financeService.getUpcomingChecks();
       setAlertCount(res.length);
     } catch (e) {
       console.error(e);
@@ -72,7 +85,6 @@ export const MainLayout = () => {
   };
 
   const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
-
   const handleMenuUser = (event: React.MouseEvent<HTMLElement>) =>
     setAnchorEl(event.currentTarget);
   const handleCloseUser = () => setAnchorEl(null);
@@ -87,13 +99,14 @@ export const MainLayout = () => {
     setOpenMenus((prev) => ({ ...prev, [menuKey]: !prev[menuKey] }));
   };
 
-  // --- DEFINICIÓN DEL MENÚ ---
+  // --- DEFINICIÓN DEL MENÚ CON PERMISOS ---
   const menuStructure = [
     {
       id: "dashboard",
       text: "Dashboard",
       icon: <DashboardIcon />,
       path: "/",
+      permission: null, // Público
     },
 
     // MÓDULO VENTAS
@@ -101,10 +114,11 @@ export const MainLayout = () => {
       id: "sales",
       text: "Ventas",
       icon: <ShoppingCartIcon />,
+      permission: "sales.view", // 👈 Requiere permiso base
       children: [
-        { text: "Nueva Venta", path: "/sales/pos" }, // Futuro
-        { text: "Historial Ventas", path: "/sales" },
-        { text: "Clientes", path: "/sales/clients" },
+        { text: "Nueva Venta", path: "/sales/pos", permission: "sales.create" },
+        { text: "Historial Ventas", path: "/sales", permission: "sales.view" },
+        { text: "Clientes", path: "/sales/clients", permission: "sales.view" },
       ],
     },
 
@@ -113,33 +127,46 @@ export const MainLayout = () => {
       id: "inventory",
       text: "Inventario & Compras",
       icon: <InventoryIcon />,
+      permission: "inventory.view", // 👈 Requiere permiso base
       children: [
-        { text: "Productos", path: "/inventory" },
-        { text: "Historial Compras", path: "/inventory/purchases" },
-        { text: "Proveedores", path: "/inventory/providers" },
+        { text: "Productos", path: "/inventory", permission: "inventory.view" },
+        {
+          text: "Historial Compras",
+          path: "/inventory/purchases",
+          permission: "inventory.view",
+        }, // O inventory.manage
+        {
+          text: "Proveedores",
+          path: "/inventory/providers",
+          permission: "providers.manage",
+        },
       ],
     },
 
-    // MÓDULO FINANZAS (EL NUEVO!)
+    // MÓDULO FINANZAS
     {
       id: "finance",
       text: "Finanzas",
       icon: <AttachMoney />,
+      permission: "finance.view", // 👈 Solo Admins/Contadores
       children: [
         {
-          text: "Caja / Tesorería", // 👈 NUEVO ITEM
+          text: "Caja / Tesorería",
           path: "/finance/cash",
-          icon: <Store fontSize="small" />, // O el ícono que prefieras
+          icon: <Store fontSize="small" />,
+          permission: "finance.view",
         },
         {
           text: "Gastos",
           path: "/finance/expenses",
-          icon: <RemoveCircle fontSize="small" />, // Importar RemoveCircle de @mui/icons-material
+          icon: <RemoveCircle fontSize="small" />,
+          permission: "finance.manage",
         },
         {
           text: "Nueva Orden Pago",
           path: "/finance/payments/new",
           icon: <Output fontSize="small" />,
+          permission: "finance.manage",
         },
         {
           text: "Cartera Cheques",
@@ -149,8 +176,8 @@ export const MainLayout = () => {
               <AccountBalanceWallet fontSize="small" />
             </Badge>
           ),
+          permission: "finance.view",
         },
-        // { text: "Cta. Cte. Proveedores", path: "/finance/current-account", icon: <ReceiptLong fontSize="small"/> },
       ],
     },
 
@@ -158,21 +185,34 @@ export const MainLayout = () => {
     {
       id: "system",
       text: "Sistema",
-      isHeader: true, // Solo visual, separador
+      isHeader: true,
+      permission: "users.view", // Solo si puede ver usuarios o config
     },
-    { id: "users", text: "Usuarios", icon: <PeopleAlt />, path: "/users" },
-    { id: "branches", text: "Sucursales", icon: <Store />, path: "/branches" },
+    {
+      id: "users",
+      text: "Usuarios",
+      icon: <PeopleAlt />,
+      path: "/users",
+      permission: "users.view",
+    },
+    {
+      id: "branches",
+      text: "Sucursales",
+      icon: <Store />,
+      path: "/branches",
+      permission: "settings.view",
+    },
     {
       id: "settings",
       text: "Configuración",
       icon: <Settings />,
       path: "/settings",
+      permission: "settings.view",
     },
   ];
 
   const drawerContent = (
     <div>
-      {/* CABECERA DEL DRAWER */}
       <Toolbar
         sx={{
           backgroundColor: "primary.main",
@@ -188,13 +228,16 @@ export const MainLayout = () => {
           MI ERP
         </Typography>
         <Typography variant="caption" sx={{ opacity: 0.8 }}>
-          Sucursal Principal
+          {user?.role?.name || "Usuario"} {/* Mostramos el rol */}
         </Typography>
       </Toolbar>
       <Divider />
 
       <List component="nav" sx={{ pt: 1 }}>
-        {menuStructure.map((item) => {
+        {menuStructure.map((item: any) => {
+          // 1. FILTRO PADRE: Si no tiene permiso para el módulo, no renderizamos nada
+          if (!hasPermission(item.permission)) return null;
+
           // Si es un separador
           if (item.isHeader) {
             return (
@@ -211,10 +254,17 @@ export const MainLayout = () => {
 
           // Si tiene hijos (Submenú)
           if (item.children) {
+            // 2. FILTRO HIJOS: Filtramos los sub-items que puede ver
+            const visibleChildren = item.children.filter((child: any) =>
+              hasPermission(child.permission)
+            );
+
+            // Si después de filtrar no queda ningún hijo, no mostramos el padre tampoco
+            if (visibleChildren.length === 0) return null;
+
             const isOpen = openMenus[item.id];
-            // Verificamos si alguna ruta hija está activa para resaltar el padre
-            const isChildActive = item.children.some(
-              (child) => location.pathname === child.path
+            const isChildActive = visibleChildren.some(
+              (child: any) => location.pathname === child.path
             );
 
             return (
@@ -240,17 +290,16 @@ export const MainLayout = () => {
 
                 <Collapse in={isOpen} timeout="auto" unmountOnExit>
                   <List component="div" disablePadding>
-                    {item.children.map((child) => (
+                    {visibleChildren.map((child: any) => (
                       <ListItemButton
                         key={child.path}
-                        sx={{ pl: 4 }} // Indentación
+                        sx={{ pl: 4 }}
                         selected={location.pathname === child.path}
                         onClick={() => {
                           navigate(child.path);
-                          if (mobileOpen) setMobileOpen(false); // Cerrar en mobile al clickear
+                          if (mobileOpen) setMobileOpen(false);
                         }}
                       >
-                        {/* Si tiene icono específico lo mostramos, sino nada */}
                         {child.icon && (
                           <ListItemIcon sx={{ minWidth: 30 }}>
                             {child.icon}
@@ -297,16 +346,16 @@ export const MainLayout = () => {
 
   return (
     <Box sx={{ display: "flex" }}>
+      {/* ... (Resto del return igual que antes) ... */}
+      {/* Copia tu return original desde <CssBaseline /> hasta el final del componente MainLayout */}
       <CssBaseline />
-
-      {/* NAVBAR SUPERIOR */}
       <AppBar
         position="fixed"
         elevation={0}
         sx={{
           width: { sm: `calc(100% - ${drawerWidth}px)` },
           ml: { sm: `${drawerWidth}px` },
-          bgcolor: "background.paper", // Fondo blanco moderno
+          bgcolor: "background.paper",
           color: "text.primary",
           borderBottom: "1px solid #e0e0e0",
         }}
@@ -321,27 +370,13 @@ export const MainLayout = () => {
           >
             <MenuIcon />
           </IconButton>
-
-          {/* Espacio para el Dolar / Info Empresa */}
           <Box
             sx={{ flexGrow: 1, display: "flex", alignItems: "center", gap: 2 }}
           >
             <Typography variant="h6" noWrap component="div">
               Panel de Control
             </Typography>
-
-            {/* EJEMPLO FUTURO: CHIP DEL DOLAR */}
-            {/* <Chip 
-                label="USD $1.200" 
-                color="success" 
-                variant="outlined" 
-                size="small" 
-                icon={<AttachMoney />}
-             /> 
-             */}
           </Box>
-
-          {/* MENÚ USUARIO */}
           <div>
             <IconButton size="large" onClick={handleMenuUser} color="primary">
               <AccountCircle fontSize="large" />
@@ -367,8 +402,6 @@ export const MainLayout = () => {
           </div>
         </Toolbar>
       </AppBar>
-
-      {/* SIDEBAR RESPONSIVE */}
       <Box
         component="nav"
         sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}
@@ -402,8 +435,6 @@ export const MainLayout = () => {
           {drawerContent}
         </Drawer>
       </Box>
-
-      {/* CONTENIDO PRINCIPAL */}
       <Box
         component="main"
         sx={{
@@ -411,7 +442,7 @@ export const MainLayout = () => {
           p: 3,
           width: { sm: `calc(100% - ${drawerWidth}px)` },
           mt: 8,
-          bgcolor: "#f4f6f8", // Fondo gris muy clarito para que resalten las cards
+          bgcolor: "#f4f6f8",
           minHeight: "100vh",
         }}
       >
