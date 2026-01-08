@@ -113,8 +113,7 @@ export const AccountDetailsPage = () => {
 
   // --- VER DETALLE DE VENTA (MODIFICADO PARA DEBUG) ---
   const handleViewDetail = async (movement: any) => {
-    console.log("Intentando ver detalle:", movement);
-    setErrorMsg(""); // Limpiar errores previos
+    setErrorMsg(""); 
 
     // 1. Validar que sea venta
     if (movement.concept !== "SALE") {
@@ -135,7 +134,6 @@ export const AccountDetailsPage = () => {
     setLoadingDetail(true);
     try {
       const sale = await salesService.getById(movement.reference_id);
-      console.log("Venta recuperada:", sale);
       setSelectedSale(sale);
     } catch (error) {
       console.error("Error cargando venta", error);

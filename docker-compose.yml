@@ -1,29 +1,69 @@
 version: '3.8'
 
 services:
+  # 1. BASE DE DATOS (Ya la tenías)
   db:
     image: postgres:15-alpine
     container_name: erp_db
     restart: always
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin_password
-      POSTGRES_DB: erp_database
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
     ports:
       - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  # 2. PGADMIN (Ya lo tenías)
   pgadmin:
     image: dpage/pgadmin4
     container_name: erp_pgadmin
+    restart: always
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
     ports:
       - '5050:80'
     depends_on:
       - db
+
+  # 3. BACKEND (API) - ¡NUEVO!
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: erp_api
+    restart: always
+    ports:
+      - '3000:3000'
+    environment:
+      # Conexión a DB (usamos el nombre del servicio 'db' como host)
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_DATABASE: ${DB_NAME}
+      JWT_SECRET: ${JWT_SECRET}
+      # URL permitida (el frontend en el navegador del usuario)
+      FRONTEND_URL: ${FRONTEND_URL} 
+    depends_on:
+      - db
+
+  # 4. FRONTEND (CLIENTE) - ¡NUEVO!
+  client:
+    build:
+      context: .
+      dockerfile: apps/client/Dockerfile
+      args:
+        # Aquí definimos la URL pública de tu API para que el front sepa a dónde llamar
+        VITE_API_URL: ${VITE_API_URL}
+    container_name: erp_client
+    restart: always
+    ports:
+      - '80:80' # El puerto estándar web
+    depends_on:
+      - api
 
 volumes:
   postgres_data:

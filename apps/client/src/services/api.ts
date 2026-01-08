@@ -1,21 +1,12 @@
 import axios from 'axios';
 
-// ------------------------------------------------------------------
-// 1. CONFIGURACIÓN DINÁMICA DE RED (Para que ande en Celular y PC)
-// ------------------------------------------------------------------
-const protocol = window.location.protocol;
-const hostname = window.location.hostname;
-const port = '3000';
-
-const API_URL = `${protocol}//${hostname}:${port}/api`;
-console.log('🔗 Conectando a API en:', API_URL);
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 export const api = axios.create({
     baseURL: API_URL,
     headers: { 'Content-Type': 'application/json' },
 });
 
-// Interceptor para agregar el Token
 api.interceptors.request.use((config) => {
     const token = localStorage.getItem('token');
     if (token) config.headers.Authorization = `Bearer ${token}`;

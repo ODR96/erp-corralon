@@ -36,8 +36,6 @@ export const LoginPage = () => {
       // A. LLAMADA REAL A LA API
       const data = await authService.login(email, password);
 
-      console.log("Login exitoso:", data);
-
       // B. GUARDAR TOKEN (La llave del edificio)
       localStorage.setItem("token", data.access_token);
       localStorage.setItem("user", JSON.stringify(data.user));

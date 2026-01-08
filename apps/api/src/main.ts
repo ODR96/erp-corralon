@@ -5,9 +5,10 @@ import { ValidationPipe } from '@nestjs/common';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // 1. Activamos CORS para que tu celular pueda pedir datos
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
   app.enableCors({
-    origin: '*', // Permitir acceso desde cualquier IP (solo para desarrollo)
+    origin: frontendUrl, // Permitir acceso desde cualquier IP (solo para desarrollo)
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });
@@ -22,9 +23,8 @@ async function bootstrap() {
     }),
   );
 
-  // 2. IMPORTANTE: Agregamos '0.0.0.0' para escuchar en la red, no solo local
   await app.listen(3000, '0.0.0.0'); 
   
-  console.log(`🚀 Server corriendo en: ${await app.getUrl()}`);
+  console.log(`🚀 Server listo. Aceptando peticiones desde: ${frontendUrl}`);
 }
 bootstrap();
