@@ -47,6 +47,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       # URL permitida (el frontend en el navegador del usuario)
       FRONTEND_URL: ${FRONTEND_URL} 
+      SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL}
     depends_on:
       - db
 

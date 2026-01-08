@@ -245,6 +245,7 @@ export const ProductsPage = () => {
   // Importación
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
 
   // Nuevos estados para el Modal de Importación
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -320,6 +321,9 @@ export const ProductsPage = () => {
   // Analizar Archivo (Paso 1 -> Paso 2)
   const handleAnalyze = async () => {
     if (!filesToImport?.[0]) return;
+
+    setAnalyzing(true);
+
     try {
       const res = await inventoryService.analyzeImportFile(filesToImport[0]);
       setDetectedHeaders(res.headers);
@@ -368,6 +372,8 @@ export const ProductsPage = () => {
       setImportStep(2);
     } catch (e) {
       showNotification("Error al leer el archivo", "error");
+    } finally {
+      setAnalyzing(false);
     }
   };
 
@@ -1500,8 +1506,17 @@ export const ProductsPage = () => {
                 <Button onClick={() => setImportModalOpen(false)}>
                   Cancelar
                 </Button>
-                <Button variant="contained" onClick={handleAnalyze}>
-                  Siguiente: Mapear Columnas
+                <Button
+                  variant="contained"
+                  onClick={handleAnalyze}
+                  disabled={analyzing} // 1. Deshabilitar para que no le den click doble
+                  startIcon={
+                    analyzing ? (
+                      <CircularProgress size={20} color="inherit" />
+                    ) : null
+                  } // 2. Icono
+                >
+                  {analyzing ? "Procesando..." : "Siguiente: Mapear Columnas"}
                 </Button>
               </Grid>
             </Grid>
