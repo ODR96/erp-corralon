@@ -41,9 +41,9 @@ services:
       # Conexión a DB (usamos el nombre del servicio 'db' como host)
       DB_HOST: db
       DB_PORT: 5432
-      DB_USERNAME: ${DB_USER}
+      DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_DATABASE: ${DB_NAME}
+      DB_NAME: ${DB_NAME}
       JWT_SECRET: ${JWT_SECRET}
       # URL permitida (el frontend en el navegador del usuario)
       FRONTEND_URL: ${FRONTEND_URL} 

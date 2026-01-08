@@ -32,7 +32,6 @@ export class SeedService implements OnModuleInit {
     async seed() {
         this.logger.log('🌱 Iniciando Seeding inteligente...');
 
-        // 1. UNIDADES DE MEDIDA (Siempre verificamos que existan)
         const unitsCount = await this.unitsRepo.count();
         if (unitsCount === 0) {
             this.logger.log('📏 Creando Unidades de Medida...');
@@ -46,15 +45,14 @@ export class SeedService implements OnModuleInit {
             ]);
         }
 
-        // 3. TENANT (EMPRESA)
-        let tenant = await this.tenantRepo.findOne({ where: { slug: 'corralon-demo' } });
+        let tenant = await this.tenantRepo.findOne({ where: { slug: 'corralon-20-de-junio' } });
 
         if (!tenant) {
             this.logger.log('🏢 Creando Tenant Demo...');
             tenant = await this.tenantRepo.save(this.tenantRepo.create({
-                name: 'Corralón Demo',
-                slug: 'corralon-demo',
-                tax_id: '20-12345678-9',
+                name: 'Corralón 20 de Junio',
+                slug: 'corralon-20-de-junio',
+                tax_id: '20-39319848-7',
                 is_active: true,
             }));
         }
@@ -65,8 +63,8 @@ export class SeedService implements OnModuleInit {
             this.logger.log('🏪 Creando Sucursal Central...');
             branch = await this.branchRepo.save(this.branchRepo.create({
                 name: 'Casa Central',
-                address: 'Av. Principal 123',
-                phone: '555-0000',
+                address: '20 de Junio 260',
+                phone: '3704-201810',
                 tenant: tenant,
             }));
         }
