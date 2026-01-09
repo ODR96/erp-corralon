@@ -22,14 +22,12 @@ export class UsersController {
     @RequirePermissions('users.view')
     findAll(
         @Request() req: any,
-        @Query('page') page: number = 1,      // <--- Recibimos paginación
-        @Query('limit') limit: number = 10,   // <--- Recibimos límite
-        @Query('search') search: string = '',  // <--- Recibimos búsqueda
+        @Query('page') page: number = 1,      
+        @Query('limit') limit: number = 10,   
+        @Query('search') search: string = '',  
         @Query('withDeleted') withDeleted: string = 'false'
     ) {
-        // FIX ERROR 2: Pasamos los 6 argumentos (o los que definamos en el servicio ahora)
-        // Nota: Vamos a simplificar el servicio, pero por ahora le pasamos lo vital
-        return this.usersService.findAll(Number(page), Number(limit), req.user.tenant.id, search, withDeleted === 'true');
+        return this.usersService.findAll(Number(page), Number(limit), req.user.tenant.id, search, withDeleted === 'true', req.user);
     }
 
     @Get('roles')

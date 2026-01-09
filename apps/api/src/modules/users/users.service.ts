@@ -67,10 +67,15 @@ export class UsersService {
     }
 
     // 2. FIND ALL
-    async findAll(page: number, limit: number, tenantId: string, search: string, withDeleted: boolean) {
+    async findAll(page: number, limit: number, tenantId: string, search: string, withDeleted: boolean, currentUser) {
         const skip = (page - 1) * limit;
 
         const where: any = { tenant: { id: tenantId } };
+
+        if (!currentUser.is_super_admin) {
+            where.is_super_admin = false;
+        }
+
         if (search) {
             where.full_name = ILike(`%${search}%`);
         }
@@ -146,6 +151,8 @@ async getRoles(tenantId: string, currentUser: any) {
         }
 
         if (dto.full_name) user.full_name = dto.full_name;
+
+        if (dto.email) user.email = dto.email;
 
         if (dto.roleId) {
             const role = await this.roleRepo.findOneBy({ id: dto.roleId });
