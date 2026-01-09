@@ -12,13 +12,13 @@ export class ProviderAccountsController {
     constructor(private readonly accountsService: ProviderAccountsService) { }
 
     @Post()
-    @RequirePermissions('products.manage')
+    @RequirePermissions('providers.manage')
     create(@Body() createDto: CreateProviderAccountDto, @Request() req: any) {
         return this.accountsService.create(createDto, req.user.tenant.id);
     }
 
     @Get('provider/:providerId')
-    @RequirePermissions('products.manage', 'stock.view')
+    @RequirePermissions('providers.manage', 'stock.view')
     findAll(
         @Param('providerId') providerId: string,
         @Query('withDeleted') withDeleted: string = 'false',
@@ -28,19 +28,19 @@ export class ProviderAccountsController {
     }
 
     @Patch(':id')
-    @RequirePermissions('products.manage')
+    @RequirePermissions('providers.manage')
     update(@Param('id') id: string, @Body() updateDto: UpdateProviderAccountDto, @Request() req: any) {
         return this.accountsService.update(id, updateDto, req.user.tenant.id);
     }
 
     @Delete(':id')
-    @RequirePermissions('products.manage')
+    @RequirePermissions('providers.manage')
     remove(@Param('id') id: string, @Query('hard') hard: string = 'false') {
         return this.accountsService.remove(id, hard === 'true');
     }
 
     @Patch(':id/restore')
-    @RequirePermissions('products.manage')
+    @RequirePermissions('providers.manage')
     restore(@Param('id') id: string) {
         return this.accountsService.restore(id);
     }

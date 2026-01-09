@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, ILike, LessThan, MoreThanOrEqual, Brackets, EntityManager } from 'typeorm';
+import { Repository, Between, ILike, LessThan, MoreThanOrEqual, Brackets, EntityManager, In } from 'typeorm';
 import { Check, CheckStatus, CheckType } from '../entities/check.entity';
 import { CreateCheckDto } from '../dto/create-check.dto';
 import { UpdateCheckDto } from '../dto/update-check.dto';
@@ -16,8 +16,8 @@ export class ChecksService {
         private readonly accountService: CurrentAccountService
     ) { }
 
-async create(createDto: CreateCheckDto, tenantId: string, manager?: EntityManager) {
-        
+    async create(createDto: CreateCheckDto, tenantId: string, manager?: EntityManager) {
+
         // Si nos pasan un manager (transacción), usamos ese repo. Si no, el normal.
         const repo = manager ? manager.getRepository(Check) : this.checkRepo;
 
@@ -60,7 +60,7 @@ async create(createDto: CreateCheckDto, tenantId: string, manager?: EntityManage
         if (createDto.type === CheckType.THIRD_PARTY && createDto.client_id) {
             await this.accountService.addMovement({
                 date: new Date(),
-                type: MovementType.CREDIT, 
+                type: MovementType.CREDIT,
                 concept: MovementConcept.CHECK,
                 amount: createDto.amount,
                 description: `Recibido Cheque #${createDto.number} (${createDto.bank_name})`,
@@ -154,26 +154,54 @@ async create(createDto: CreateCheckDto, tenantId: string, manager?: EntityManage
         return this.checkRepo.save(check);
     }
 
-    // 👇 ESTO ES PARA TUS REPORTES FUTUROS
-    // Calcula cuánto tenemos que pagar en los próximos 7 días
+
     async getUpcomingPayments(tenantId: string) {
-        const today = new Date();
         const nextWeek = new Date();
-        nextWeek.setDate(today.getDate() + 7);
+        nextWeek.setDate(nextWeek.getDate() + 7);
 
         return this.checkRepo.find({
             where: {
                 tenant: { id: tenantId },
-                status: CheckStatus.PENDING, // O entregados que aún no se debitaron
-                type: CheckType.OWN,
-                payment_date: Between(today, nextWeek)
+                status: In([CheckStatus.PENDING, CheckStatus.DEPOSITED]), // Solo los que no se debitaron aún
+                type: CheckType.OWN,         // Cheques propios
+                payment_date: LessThan(nextWeek) // <--- CAMBIO CLAVE: Todo lo que sea menor a la semana que viene (incluye el pasado)
             },
-            order: { payment_date: 'ASC' }
+            order: { payment_date: 'ASC' },
+            relations: ['provider'] // Nos aseguramos de traer el proveedor
+        });
+    }
+
+    async getIncomingMoney(tenantId: string) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const limitDate = new Date(today);
+        limitDate.setDate(today.getDate() + 3); // Miramos hasta 3 días adelante (Hoy, Mañana, Pasado)
+
+        // Buscamos cheques de Terceros que estén DEPOSITADOS o PENDIENTES (por si te olvidaste de depositarlo)
+        // y que venzan en estos días.
+        return this.checkRepo.find({
+            where: [
+                {
+                    tenant: { id: tenantId },
+                    type: CheckType.THIRD_PARTY,
+                    status: CheckStatus.DEPOSITED, // Ya en el banco
+                    payment_date: LessThan(limitDate), // Vencen pronto
+                    amount: MoreThanOrEqual(0) // Truco para que TypeORM no se queje
+                },
+                {
+                    tenant: { id: tenantId },
+                    type: CheckType.THIRD_PARTY,
+                    status: CheckStatus.PENDING, // En mano (¡Alerta para ir al banco!)
+                    payment_date: LessThan(limitDate),
+                }
+            ],
+            relations: ['client'],
+            order: { payment_date: 'ASC' } // Los más urgentes primero
         });
     }
 
     async exportToExcel(tenantId: string) {
-        // Traemos todos los cheques (podrías reusar findAll si quisieras aplicar filtros)
         const checks = await this.checkRepo.find({
             where: { tenant: { id: tenantId } },
             relations: ['client', 'provider'],
@@ -200,7 +228,7 @@ async create(createDto: CreateCheckDto, tenantId: string, manager?: EntityManage
     }
 
     // 2. IMPORTAR DESDE EXCEL
-async importFromExcel(file: Express.Multer.File, tenantId: string) {
+    async importFromExcel(file: Express.Multer.File, tenantId: string) {
         const workbook = XLSX.read(file.buffer, { type: 'buffer' });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         // Usamos defval: '' y raw: false para leer fechas y números como texto si hace falta
@@ -234,7 +262,7 @@ async importFromExcel(file: Express.Multer.File, tenantId: string) {
                 // 1. Detección de Columnas (Tu Formato vs Estándar)
                 const number = String(row['Nro Cheque'] || row['NRO'] || row['NUMERO'] || '').trim();
                 const amountRaw = row['Monto'] || row['IMPORTE'] || row['PRECIO'] || 0;
-                
+
                 // Limpieza de monto (por si viene "$ 1.500")
                 let amount = 0;
                 if (typeof amountRaw === 'number') amount = amountRaw;
@@ -270,7 +298,7 @@ async importFromExcel(file: Express.Multer.File, tenantId: string) {
 
                 // 6. Evitar Duplicados (Mismo número y banco)
                 // Como tu Excel no tiene Banco, asumimos 'Desconocido' o lo sacamos del proveedor
-                const bank = 'Desconocido'; 
+                const bank = 'Desconocido';
 
                 const exists = await this.checkRepo.findOne({
                     where: { number, tenant: { id: tenantId } }

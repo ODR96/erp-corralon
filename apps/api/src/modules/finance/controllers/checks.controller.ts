@@ -74,10 +74,16 @@ export class ChecksController {
         return this.checksService.update(id, updateDto, req.user.tenant.id);
     }
 
-    // Endpoint especial para Dashboard (Alertas)
-    @Get('dashboard/upcoming')
-    @RequirePermissions('finance.view')
-    getUpcoming(@Request() req: any) {
+    @Get('dashboard/outgoing')
+    @RequirePermissions('finance.view') 
+    getOutgoingChecks(@Request() req: any) {
         return this.checksService.getUpcomingPayments(req.user.tenant.id);
     }
+
+    @Get('dashboard/incoming')
+    @RequirePermissions('finance.view') // O el permiso que uses
+    getIncomingChecks(@Request() req: any) {
+        return this.checksService.getIncomingMoney(req.user.tenant.id);
+    }
+
 }
