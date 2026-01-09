@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom"; // 👈 1. Importamos esto
 import {
   Card,
   CardContent,
@@ -28,6 +29,7 @@ import { es } from "date-fns/locale";
 export const OutgoingChecksWidget = () => {
   const [checks, setChecks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate(); // 👈 2. Inicializamos el hook de navegación
 
   useEffect(() => {
     loadData();
@@ -44,16 +46,18 @@ export const OutgoingChecksWidget = () => {
     }
   };
 
-  const handleMarkAsDeposited = async (id: string) => {
+  const handleMarkAsDeposited = async (id: string, e: any) => {
+    e.stopPropagation(); // Evita que el click dispare la navegación
     try {
       await api.patch(`/finance/checks/${id}`, { status: "DEPOSITED" });
       loadData();
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      console.error(err);
     }
   };
 
-  const handleMarkAsPaid = async (id: string) => {
+  const handleMarkAsPaid = async (id: string, e: any) => {
+    e.stopPropagation(); // Evita que el click dispare la navegación
     if (
       !window.confirm("¿Confirmar que ya se descontó el dinero de la cuenta?")
     )
@@ -61,9 +65,13 @@ export const OutgoingChecksWidget = () => {
     try {
       await api.patch(`/finance/checks/${id}`, { status: "PAID" });
       loadData();
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      console.error(err);
     }
+  };
+
+  const handleNavigate = () => {
+    navigate("/finance/checks"); // 👈 3. Redirige a la lista de cheques
   };
 
   // --- FILTROS Y CÁLCULOS ---
@@ -78,14 +86,10 @@ export const OutgoingChecksWidget = () => {
     (c) => c.status === "PENDING" && !isBefore(parseISO(c.payment_date), today)
   );
 
-  // Calcular Totales
   const sumTotal = (list: any[]) =>
     list.reduce((acc, c) => acc + Number(c.amount), 0);
-  const delayedTotal = sumTotal(delayedList);
-  const depositedTotal = sumTotal(depositedList);
-  const futureTotal = sumTotal(futureList);
 
-  // Subcomponente de Columna para no repetir código
+  // Subcomponente de Columna
   const ColumnSection = ({
     title,
     total,
@@ -106,7 +110,6 @@ export const OutgoingChecksWidget = () => {
       }}
       elevation={0}
     >
-      {/* Header Fijo */}
       <Box p={2} pb={1}>
         <Box display="flex" alignItems="center" mb={0.5} color="text.primary">
           {icon}
@@ -121,12 +124,14 @@ export const OutgoingChecksWidget = () => {
 
       <Divider />
 
-      {/* Lista con Scroll */}
-      <Box sx={{ flexGrow: 1, overflowY: "auto", height: 300, p: 1 }}>
+      <Box sx={{ overflowY: "auto", height: 250, p: 1 }}>
         <List dense disablePadding>
           {list.map((c: any) => (
             <ListItem
               key={c.id}
+              // 👇 Hacemos que toda la tarjeta sea clickeable
+              button
+              onClick={handleNavigate}
               sx={{
                 px: 1.5,
                 py: 1,
@@ -144,15 +149,17 @@ export const OutgoingChecksWidget = () => {
                 }
                 secondary={
                   <>
+                    {/* 👇 Aquí agregamos el Número del Cheque */}
                     <Typography
                       variant="caption"
                       display="block"
-                      noWrap
-                      title={c.provider?.name || c.recipient_name}
+                      color="text.primary"
+                      fontWeight="bold"
                     >
-                      {c.provider?.name || c.recipient_name}
+                      #{c.number} - {c.provider?.name || c.recipient_name}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
+                      Vence:{" "}
                       {format(parseISO(c.payment_date), "dd/MM", {
                         locale: es,
                       })}
@@ -165,7 +172,8 @@ export const OutgoingChecksWidget = () => {
                   <IconButton
                     size="small"
                     color="primary"
-                    onClick={() => btnAction(c.id)}
+                    // Pasamos el evento 'e' para detener la propagación
+                    onClick={(e) => btnAction(c.id, e)}
                   >
                     {btnIcon}
                   </IconButton>
@@ -197,14 +205,12 @@ export const OutgoingChecksWidget = () => {
         <Typography variant="h6" fontWeight="bold" mb={2}>
           Gestion de Cheques Emitidos 📉
         </Typography>
-
         <Grid container spacing={2}>
-          {/* 1. ATRASADOS */}
           <Grid item xs={12} md={4}>
             <ColumnSection
               title="Atrasados"
-              total={delayedTotal}
-              color="#ffebee" // Rojo suave
+              total={sumTotal(delayedList)}
+              color="#ffebee"
               icon={<Warning color="error" />}
               list={delayedList}
               btnAction={handleMarkAsDeposited}
@@ -212,13 +218,11 @@ export const OutgoingChecksWidget = () => {
               btnTitle="Mover a 'En Banco'"
             />
           </Grid>
-
-          {/* 2. EN BANCO */}
           <Grid item xs={12} md={4}>
             <ColumnSection
               title="En Banco"
-              total={depositedTotal}
-              color="#e3f2fd" // Azul suave
+              total={sumTotal(depositedList)}
+              color="#e3f2fd"
               icon={<AccountBalance color="primary" />}
               list={depositedList}
               btnAction={handleMarkAsPaid}
@@ -226,13 +230,11 @@ export const OutgoingChecksWidget = () => {
               btnTitle="Confirmar Débito"
             />
           </Grid>
-
-          {/* 3. PRÓXIMOS */}
           <Grid item xs={12} md={4}>
             <ColumnSection
               title="Próximos"
-              total={futureTotal}
-              color="#f5f5f5" // Gris
+              total={sumTotal(futureList)}
+              color="#f5f5f5"
               icon={<Event color="action" />}
               list={futureList}
             />

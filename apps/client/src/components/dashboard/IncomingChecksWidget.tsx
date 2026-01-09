@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom"; // 👈 Importar
 import {
   Card,
   CardContent,
@@ -25,6 +26,7 @@ export const IncomingChecksWidget = () => {
   const [checks, setChecks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
+  const navigate = useNavigate(); // 👈 Hook
 
   useEffect(() => {
     loadData();
@@ -51,23 +53,20 @@ export const IncomingChecksWidget = () => {
   return (
     <Card sx={{ width: "100%", mb: 3, bgcolor: "#fff" }}>
       <CardContent>
-        {/* TÍTULO DEL WIDGET */}
         <Typography variant="h6" fontWeight="bold" mb={2}>
           Proyeccion de Ingresos 📈
         </Typography>
 
-        {/* CONTENEDOR ESTILO "COLUMNA KANBAN" (VERDE) */}
         <Paper
           sx={{
             height: "100%",
             display: "flex",
             flexDirection: "column",
-            bgcolor: "#e8f5e9", // Verde suave
+            bgcolor: "#e8f5e9",
             border: "1px solid rgba(0,0,0,0.05)",
           }}
           elevation={0}
         >
-          {/* HEADER CON TOTAL */}
           <Box p={2} pb={1}>
             <Box display="flex" alignItems="center" mb={0.5} color="#2e7d32">
               <TrendingUp />
@@ -82,14 +81,15 @@ export const IncomingChecksWidget = () => {
 
           <Divider />
 
-          {/* LISTA CON SCROLL */}
-          <Box sx={{ flexGrow: 1, overflowY: "auto", height: 300, p: 1 }}>
+          <Box sx={{ overflowY: "auto", height: 250, p: 1 }}>
             <List dense disablePadding>
               {checks.map((check) => {
                 const isDeposited = check.status === "DEPOSITED";
                 return (
                   <ListItem
                     key={check.id}
+                    button // 👈 Habilita efecto botón
+                    onClick={() => navigate("/finance/checks")} // 👈 Navegación
                     sx={{
                       px: 1.5,
                       py: 1,
@@ -107,7 +107,13 @@ export const IncomingChecksWidget = () => {
                       }
                       secondary={
                         <>
-                          <Typography variant="caption" display="block" noWrap>
+                          {/* 👇 Mostramos el N° de Cheque */}
+                          <Typography
+                            variant="caption"
+                            display="block"
+                            fontWeight="bold"
+                          >
+                            #{check.number} -{" "}
                             {check.client?.name || "Cliente Desconocido"}
                           </Typography>
                           <Typography variant="caption" color="text.secondary">

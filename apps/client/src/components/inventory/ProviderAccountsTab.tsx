@@ -76,7 +76,7 @@ export const ProviderAccountsTab = ({ providerId }: Props) => {
   };
 
   const handleSave = async () => {
-    // Validación básica de CBU (22 dígitos)
+    // Validaciones
     if (formData.cbu && formData.cbu.length !== 22) {
       showNotification("El CBU debe tener exactamente 22 números", "warning");
       return;
@@ -87,16 +87,28 @@ export const ProviderAccountsTab = ({ providerId }: Props) => {
     }
 
     try {
+      // 👇 LIMPIEZA DE DATOS:
+      // Creamos un objeto SOLO con los campos que el backend acepta.
+      // Así evitamos enviar 'id', 'created_at', 'updated_at' por accidente.
+      const payload = {
+        provider_id: providerId, // Usamos el ID de la prop para asegurar
+        bank_name: formData.bank_name,
+        cbu: formData.cbu,
+        alias: formData.alias,
+        currency: formData.currency,
+        is_primary: formData.is_primary,
+      };
+
       if (isEditing) {
-        await inventoryService.updateProviderAccount(formData.id, formData);
+        // En update enviamos el ID en la URL, y el payload limpio en el cuerpo
+        await inventoryService.updateProviderAccount(formData.id, payload);
         showNotification("Cuenta actualizada correctamente", "success");
       } else {
-        await inventoryService.createProviderAccount({
-          ...formData,
-          provider_id: providerId,
-        });
+        // En create enviamos el payload limpio
+        await inventoryService.createProviderAccount(payload);
         showNotification("Cuenta creada correctamente", "success");
       }
+
       setOpen(false);
       loadAccounts();
     } catch (error) {
