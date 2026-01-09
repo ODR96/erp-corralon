@@ -78,7 +78,13 @@ export class SeedService implements OnModuleInit {
             const hashedPassword = await bcrypt.hash('admin123', 10);
 
             // Buscamos el rol para asignarlo
-            const superAdminRole = await this.roleRepo.findOne({ where: { name: 'Super Admin', tenant: { id: tenant.id } } });
+            const superAdminRole = await this.roleRepo.findOne({
+                where: [
+                    { name: 'Super Admin', tenant: { id: tenant.id } }, // Opción A: Es de la empresa
+                    { name: 'Super Admin' }                             // Opción B: Es global (del AuthService)
+                ],
+                order: { id: 'ASC' } // Priorizamos el más antiguo si hay dos
+            });
 
             user = await this.userRepo.save(this.userRepo.create({
                 full_name: 'Orlando Admin',
