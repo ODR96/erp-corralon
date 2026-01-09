@@ -26,12 +26,7 @@ import { TenantsPage } from "./pages/admin/TenantsPage";
 import { POSPage } from "./pages/sales/POSPage";
 import { CashPage } from "./pages/finance/CashPage";
 import { ExpensesPage } from "./pages/finance/ExpensesPage";
-
-const DashboardPlaceholder = () => (
-  <Typography variant="h4" sx={{ p: 3 }}>
-    Bienvenido al Panel de Control
-  </Typography>
-);
+import DashboardPage from "./pages/DashboardPage";
 
 function App() {
   return (
@@ -48,7 +43,7 @@ function App() {
           <Route element={<ProtectedRoute />}>
             <Route element={<MainLayout />}>
               {/* 1. ACCESO GENERAL (Todos los logueados ven esto) */}
-              <Route path="/" element={<DashboardPlaceholder />} />
+              <Route path="/" element={<DashboardPage />} />
               <Route path="/profile" element={<ProfilePage />} />
 
               {/* 2. VENTAS (Requiere 'sales.view' o 'sales.create') */}

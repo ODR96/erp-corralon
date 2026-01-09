@@ -467,7 +467,7 @@ export const financeService = {
     },
 
     getUpcomingChecks: async () => {
-        const response = await api.get('/finance/checks/dashboard/upcoming');
+        const response = await api.get('/finance/checks/dashboard/outgoing');
         return response.data;
     },
 
