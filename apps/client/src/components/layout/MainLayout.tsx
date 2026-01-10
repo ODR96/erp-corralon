@@ -17,9 +17,13 @@ import {
   MenuItem,
   Collapse,
   Badge,
+  useMediaQuery,
+  useTheme,
+  Tooltip,
 } from "@mui/material";
 import {
   Menu as MenuIcon,
+  MenuOpen as MenuOpenIcon, // Icono para cerrar
   Dashboard as DashboardIcon,
   Inventory as InventoryIcon,
   ShoppingCart as ShoppingCartIcon,
@@ -34,19 +38,26 @@ import {
   AttachMoney,
   Output,
   RemoveCircle,
+  ChevronLeft,
 } from "@mui/icons-material";
 import { financeService } from "../../services/api";
 
-const drawerWidth = 260;
+const DRAWER_WIDTH = 260; // Ancho expandido
+const MINI_DRAWER_WIDTH = 70; // Ancho colapsado (solo iconos)
 
 export const MainLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [alertCount, setAlertCount] = useState(0);
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm")); // Detecta si es celular
 
-  const [mobileOpen, setMobileOpen] = useState(false);
+  // Estados
+  const [alertCount, setAlertCount] = useState(0);
+  const [mobileOpen, setMobileOpen] = useState(false); // Para celular (drawer temporal)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true); // Para escritorio (drawer persistente)
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
 
+  // Menús colapsables
   const [openMenus, setOpenMenus] = useState<{ [key: string]: boolean }>({
     finance: true,
     inventory: false,
@@ -59,21 +70,21 @@ export const MainLayout = () => {
 
   const hasPermission = (requiredSlug?: string) => {
     if (!user) return false;
-    if (!requiredSlug) return true; // Público
-    // Si es Super Admin, ve todo (o si tiene rol SUPER_ADMIN)
+    if (!requiredSlug) return true;
     if (user.is_super_admin || user.role?.name === "SUPER_ADMIN") return true;
-
     const myPermissions = user.role?.permissions || [];
     return myPermissions.some((p: any) => p.slug === requiredSlug);
   };
-  // -----------------------
 
   useEffect(() => {
-    // Solo chequeamos alertas si tiene permiso de finanzas
     if (hasPermission("finance.view")) {
       checkAlerts();
     }
-  }, []);
+    // En pantallas chicas, arrancamos con sidebar cerrado
+    if (isMobile) {
+      setIsSidebarOpen(false);
+    }
+  }, [isMobile]);
 
   const checkAlerts = async () => {
     try {
@@ -84,7 +95,10 @@ export const MainLayout = () => {
     }
   };
 
-  const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
+  // Handlers
+  const handleDrawerToggle = () => setMobileOpen(!mobileOpen); // Celular
+  const handleSidebarToggle = () => setIsSidebarOpen(!isSidebarOpen); // Escritorio
+
   const handleMenuUser = (event: React.MouseEvent<HTMLElement>) =>
     setAnchorEl(event.currentTarget);
   const handleCloseUser = () => setAnchorEl(null);
@@ -96,45 +110,43 @@ export const MainLayout = () => {
   };
 
   const handleSubmenuClick = (menuKey: string) => {
+    // Si la sidebar está colapsada y clicamos un menú padre, la expandimos automáticamente
+    if (!isSidebarOpen && !isMobile) setIsSidebarOpen(true);
     setOpenMenus((prev) => ({ ...prev, [menuKey]: !prev[menuKey] }));
   };
 
-  // --- DEFINICIÓN DEL MENÚ CON PERMISOS ---
+  // --- MENU ---
   const menuStructure = [
     {
       id: "dashboard",
       text: "Dashboard",
       icon: <DashboardIcon />,
       path: "/",
-      permission: null, // Público
+      permission: null,
     },
-
-    // MÓDULO VENTAS
     {
       id: "sales",
       text: "Ventas",
       icon: <ShoppingCartIcon />,
-      permission: "sales.view", // 👈 Requiere permiso base
+      permission: "sales.view",
       children: [
         { text: "Nueva Venta", path: "/sales/pos", permission: "sales.create" },
         { text: "Historial Ventas", path: "/sales", permission: "sales.view" },
         { text: "Clientes", path: "/sales/clients", permission: "sales.view" },
       ],
     },
-
-    // MÓDULO INVENTARIO
     {
       id: "inventory",
-      text: "Inventario & Compras",
+      text: "Inventario",
       icon: <InventoryIcon />,
-      permission: "inventory.view", // 👈 Requiere permiso base
+      permission: "inventory.view",
       children: [
         { text: "Productos", path: "/inventory", permission: "inventory.view" },
         {
           text: "Historial Compras",
           path: "/inventory/purchases",
           permission: "inventory.view",
-        }, // O inventory.manage
+        },
         {
           text: "Proveedores",
           path: "/inventory/providers",
@@ -142,13 +154,11 @@ export const MainLayout = () => {
         },
       ],
     },
-
-    // MÓDULO FINANZAS
     {
       id: "finance",
       text: "Finanzas",
       icon: <AttachMoney />,
-      permission: "finance.view", // 👈 Solo Admins/Contadores
+      permission: "finance.view",
       children: [
         {
           text: "Caja / Tesorería",
@@ -163,13 +173,13 @@ export const MainLayout = () => {
           permission: "finance.manage",
         },
         {
-          text: "Nueva Orden Pago",
+          text: "Pagos / Ordenes",
           path: "/finance/payments/new",
           icon: <Output fontSize="small" />,
           permission: "finance.manage",
         },
         {
-          text: "Cartera Cheques",
+          text: "Cheques",
           path: "/finance/checks",
           icon: (
             <Badge badgeContent={alertCount} color="error" variant="dot">
@@ -180,14 +190,7 @@ export const MainLayout = () => {
         },
       ],
     },
-
-    // SISTEMA
-    {
-      id: "system",
-      text: "Sistema",
-      isHeader: true,
-      permission: "users.view", // Solo si puede ver usuarios o config
-    },
+    { id: "system", text: "Sistema", isHeader: true, permission: "users.view" },
     {
       id: "users",
       text: "Usuarios",
@@ -211,201 +214,252 @@ export const MainLayout = () => {
     },
   ];
 
+  // Contenido del Drawer
   const drawerContent = (
-    <div>
+    <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {/* HEADER DRAWER */}
       <Toolbar
         sx={{
-          backgroundColor: "primary.main",
+          bgcolor: "primary.main",
           color: "white",
+          minHeight: "64px",
+          px: 2,
           display: "flex",
-          flexDirection: "column",
-          alignItems: "flex-start",
-          justifyContent: "center",
-          py: 1,
+          justifyContent: isSidebarOpen ? "space-between" : "center",
+          alignItems: "center",
         }}
       >
-        <Typography variant="h6" noWrap component="div" fontWeight="bold">
-          MI ERP
-        </Typography>
-        <Typography variant="caption" sx={{ opacity: 0.8 }}>
-          {user?.role?.name || "Usuario"} {/* Mostramos el rol */}
-        </Typography>
+        {isSidebarOpen ? (
+          <>
+            <Box>
+              <Typography
+                variant="subtitle1"
+                fontWeight="bold"
+                lineHeight={1.2}
+              >
+                MI ERP
+              </Typography>
+              <Typography variant="caption" sx={{ opacity: 0.8 }}>
+                {user?.role?.name || "Usuario"}
+              </Typography>
+            </Box>
+            {/* Botón para colapsar DESDE DENTRO (opcional en desktop) */}
+            {!isMobile && (
+              <IconButton
+                onClick={handleSidebarToggle}
+                size="small"
+                sx={{ color: "white" }}
+              >
+                <ChevronLeft />
+              </IconButton>
+            )}
+          </>
+        ) : (
+          <Typography variant="h6" fontWeight="bold">
+            ERP
+          </Typography>
+        )}
       </Toolbar>
       <Divider />
 
-      <List component="nav" sx={{ pt: 1 }}>
+      <List
+        component="nav"
+        sx={{ flexGrow: 1, pt: 1, px: isSidebarOpen ? 1 : 0.5 }}
+      >
         {menuStructure.map((item: any) => {
-          // 1. FILTRO PADRE: Si no tiene permiso para el módulo, no renderizamos nada
           if (!hasPermission(item.permission)) return null;
 
-          // Si es un separador
+          // Headers (SOLO visibles si está abierto)
           if (item.isHeader) {
-            return (
+            return isSidebarOpen ? (
               <Typography
                 key={item.id}
                 variant="caption"
                 color="text.secondary"
-                sx={{ px: 3, mt: 2, display: "block", fontWeight: "bold" }}
+                sx={{
+                  px: 2,
+                  mt: 2,
+                  mb: 1,
+                  display: "block",
+                  fontWeight: "bold",
+                }}
               >
                 {item.text.toUpperCase()}
               </Typography>
+            ) : (
+              <Divider sx={{ my: 1 }} key={item.id} />
             );
           }
 
-          // Si tiene hijos (Submenú)
-          if (item.children) {
-            // 2. FILTRO HIJOS: Filtramos los sub-items que puede ver
-            const visibleChildren = item.children.filter((child: any) =>
-              hasPermission(child.permission)
-            );
+          const isActive = !item.children && location.pathname === item.path;
 
-            // Si después de filtrar no queda ningún hijo, no mostramos el padre tampoco
-            if (visibleChildren.length === 0) return null;
-
-            const isOpen = openMenus[item.id];
-            const isChildActive = visibleChildren.some(
-              (child: any) => location.pathname === child.path
-            );
-
-            return (
-              <div key={item.id}>
-                <ListItemButton
-                  onClick={() => handleSubmenuClick(item.id)}
-                  selected={isChildActive}
-                  sx={{ mb: 0.5 }}
+          // Render ITEM
+          return (
+            <Box key={item.id}>
+              {/* ITEM PADRE */}
+              <ListItemButton
+                onClick={() =>
+                  item.children
+                    ? handleSubmenuClick(item.id)
+                    : navigate(item.path)
+                }
+                selected={isActive}
+                sx={{
+                  mb: 0.5,
+                  borderRadius: 1,
+                  justifyContent: isSidebarOpen ? "initial" : "center",
+                  px: 2.5,
+                }}
+              >
+                <Tooltip
+                  title={!isSidebarOpen ? item.text : ""}
+                  placement="right"
                 >
                   <ListItemIcon
-                    sx={{ color: isChildActive ? "primary.main" : "inherit" }}
+                    sx={{
+                      minWidth: 0,
+                      mr: isSidebarOpen ? 2 : "auto",
+                      justifyContent: "center",
+                      color: isActive ? "primary.main" : "inherit",
+                    }}
                   >
                     {item.icon}
                   </ListItemIcon>
+                </Tooltip>
+
+                {isSidebarOpen && (
                   <ListItemText
                     primary={item.text}
                     primaryTypographyProps={{
-                      fontWeight: isChildActive ? "bold" : "medium",
+                      fontWeight: isActive ? "bold" : "medium",
                     }}
                   />
-                  {isOpen ? <ExpandLess /> : <ExpandMore />}
-                </ListItemButton>
+                )}
 
-                <Collapse in={isOpen} timeout="auto" unmountOnExit>
+                {isSidebarOpen &&
+                  item.children &&
+                  (openMenus[item.id] ? <ExpandLess /> : <ExpandMore />)}
+              </ListItemButton>
+
+              {/* SUBMENU (Solo si sidebar abierta) */}
+              {item.children && isSidebarOpen && (
+                <Collapse in={openMenus[item.id]} timeout="auto" unmountOnExit>
                   <List component="div" disablePadding>
-                    {visibleChildren.map((child: any) => (
-                      <ListItemButton
-                        key={child.path}
-                        sx={{ pl: 4 }}
-                        selected={location.pathname === child.path}
-                        onClick={() => {
-                          navigate(child.path);
-                          if (mobileOpen) setMobileOpen(false);
-                        }}
-                      >
-                        {child.icon && (
-                          <ListItemIcon sx={{ minWidth: 30 }}>
-                            {child.icon}
-                          </ListItemIcon>
-                        )}
-                        <ListItemText primary={child.text} />
-                      </ListItemButton>
-                    ))}
+                    {item.children
+                      .filter((c: any) => hasPermission(c.permission))
+                      .map((child: any) => (
+                        <ListItemButton
+                          key={child.path}
+                          sx={{ pl: 4, borderRadius: 1, mb: 0.5 }}
+                          selected={location.pathname === child.path}
+                          onClick={() => {
+                            navigate(child.path);
+                            if (isMobile) setMobileOpen(false);
+                          }}
+                        >
+                          {child.icon && (
+                            <ListItemIcon sx={{ minWidth: 30 }}>
+                              {child.icon}
+                            </ListItemIcon>
+                          )}
+                          <ListItemText
+                            primary={child.text}
+                            primaryTypographyProps={{ fontSize: "0.9rem" }}
+                          />
+                        </ListItemButton>
+                      ))}
                   </List>
                 </Collapse>
-              </div>
-            );
-          }
-
-          // Si es un item normal
-          const isActive = location.pathname === item.path;
-          return (
-            <ListItemButton
-              key={item.id}
-              onClick={() => {
-                navigate(item.path!);
-                if (mobileOpen) setMobileOpen(false);
-              }}
-              selected={isActive}
-              sx={{ mb: 0.5 }}
-            >
-              <ListItemIcon
-                sx={{ color: isActive ? "primary.main" : "inherit" }}
-              >
-                {item.icon}
-              </ListItemIcon>
-              <ListItemText
-                primary={item.text}
-                primaryTypographyProps={{
-                  fontWeight: isActive ? "bold" : "medium",
-                }}
-              />
-            </ListItemButton>
+              )}
+            </Box>
           );
         })}
       </List>
-    </div>
+    </Box>
   );
 
   return (
     <Box sx={{ display: "flex" }}>
-      {/* ... (Resto del return igual que antes) ... */}
-      {/* Copia tu return original desde <CssBaseline /> hasta el final del componente MainLayout */}
       <CssBaseline />
+
+      {/* --- APP BAR --- */}
       <AppBar
         position="fixed"
         elevation={0}
         sx={{
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
-          ml: { sm: `${drawerWidth}px` },
+          width: {
+            sm: `calc(100% - ${
+              isSidebarOpen ? DRAWER_WIDTH : MINI_DRAWER_WIDTH
+            }px)`,
+          },
+          ml: { sm: `${isSidebarOpen ? DRAWER_WIDTH : MINI_DRAWER_WIDTH}px` },
           bgcolor: "background.paper",
           color: "text.primary",
           borderBottom: "1px solid #e0e0e0",
+          transition: theme.transitions.create(["width", "margin"], {
+            easing: theme.transitions.easing.sharp,
+            duration: theme.transitions.duration.leavingScreen,
+          }),
         }}
       >
         <Toolbar>
+          {/* Botón Mobile */}
           <IconButton
             color="inherit"
-            aria-label="open drawer"
             edge="start"
             onClick={handleDrawerToggle}
             sx={{ mr: 2, display: { sm: "none" } }}
           >
             <MenuIcon />
           </IconButton>
-          <Box
-            sx={{ flexGrow: 1, display: "flex", alignItems: "center", gap: 2 }}
+
+          {/* Botón Desktop (Colapsar/Expandir) */}
+          <IconButton
+            color="inherit"
+            edge="start"
+            onClick={handleSidebarToggle}
+            sx={{ mr: 2, display: { xs: "none", sm: "block" } }}
           >
-            <Typography variant="h6" noWrap component="div">
+            {isSidebarOpen ? <MenuOpenIcon /> : <MenuIcon />}
+          </IconButton>
+
+          <Box sx={{ flexGrow: 1 }}>
+            <Typography variant="h6" noWrap fontWeight="bold">
               Panel de Control
             </Typography>
           </Box>
-          <div>
-            <IconButton size="large" onClick={handleMenuUser} color="primary">
-              <AccountCircle fontSize="large" />
-            </IconButton>
-            <Menu
-              anchorEl={anchorEl}
-              open={Boolean(anchorEl)}
-              onClose={handleCloseUser}
-              transformOrigin={{ horizontal: "right", vertical: "top" }}
-              anchorOrigin={{ horizontal: "right", vertical: "bottom" }}
-            >
-              <MenuItem onClick={() => navigate("/profile")}>
-                Mi Perfil
-              </MenuItem>
-              <Divider />
-              <MenuItem onClick={handleLogout} sx={{ color: "error.main" }}>
-                <ListItemIcon>
-                  <LogoutIcon fontSize="small" color="error" />
-                </ListItemIcon>
-                Cerrar Sesión
-              </MenuItem>
-            </Menu>
-          </div>
+
+          <IconButton onClick={handleMenuUser} color="primary">
+            <AccountCircle fontSize="large" />
+          </IconButton>
+          <Menu
+            anchorEl={anchorEl}
+            open={Boolean(anchorEl)}
+            onClose={handleCloseUser}
+            transformOrigin={{ horizontal: "right", vertical: "top" }}
+            anchorOrigin={{ horizontal: "right", vertical: "bottom" }}
+          >
+            <MenuItem onClick={() => navigate("/profile")}>Mi Perfil</MenuItem>
+            <Divider />
+            <MenuItem onClick={handleLogout} sx={{ color: "error.main" }}>
+              <ListItemIcon>
+                <LogoutIcon fontSize="small" color="error" />
+              </ListItemIcon>
+              Cerrar Sesión
+            </MenuItem>
+          </Menu>
         </Toolbar>
       </AppBar>
+
+      {/* --- DRAWER --- */}
       <Box
         component="nav"
-        sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}
+        sx={{
+          width: { sm: isSidebarOpen ? DRAWER_WIDTH : MINI_DRAWER_WIDTH },
+          flexShrink: { sm: 0 },
+        }}
       >
+        {/* Drawer Mobile (Temporal) */}
         <Drawer
           variant="temporary"
           open={mobileOpen}
@@ -415,19 +469,26 @@ export const MainLayout = () => {
             display: { xs: "block", sm: "none" },
             "& .MuiDrawer-paper": {
               boxSizing: "border-box",
-              width: drawerWidth,
+              width: DRAWER_WIDTH,
             },
           }}
         >
           {drawerContent}
         </Drawer>
+
+        {/* Drawer Desktop (Permanente pero variable) */}
         <Drawer
           variant="permanent"
           sx={{
             display: { xs: "none", sm: "block" },
             "& .MuiDrawer-paper": {
               boxSizing: "border-box",
-              width: drawerWidth,
+              width: isSidebarOpen ? DRAWER_WIDTH : MINI_DRAWER_WIDTH,
+              transition: theme.transitions.create("width", {
+                easing: theme.transitions.easing.sharp,
+                duration: theme.transitions.duration.enteringScreen,
+              }),
+              overflowX: "hidden", // Evita scroll horizontal al colapsar
             },
           }}
           open
@@ -435,15 +496,25 @@ export const MainLayout = () => {
           {drawerContent}
         </Drawer>
       </Box>
+
+      {/* --- CONTENIDO PRINCIPAL --- */}
       <Box
         component="main"
         sx={{
           flexGrow: 1,
           p: 3,
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
+          width: {
+            sm: `calc(100% - ${
+              isSidebarOpen ? DRAWER_WIDTH : MINI_DRAWER_WIDTH
+            }px)`,
+          },
           mt: 8,
           bgcolor: "#f4f6f8",
           minHeight: "100vh",
+          transition: theme.transitions.create(["width", "margin"], {
+            easing: theme.transitions.easing.sharp,
+            duration: theme.transitions.duration.leavingScreen,
+          }),
         }}
       >
         <Outlet />
