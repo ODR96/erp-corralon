@@ -1,18 +1,20 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { CreateSaleDto } from '../dto/create-sale.dto';
-import { Sale, SaleType, PaymentMethod } from '../entities/sale.entity'; // Agregamos PaymentMethod
+import { Sale, SaleType, PaymentMethod } from '../entities/sale.entity';
 import { SaleDetail } from '../entities/sale-detail.entity';
 import { Product } from '../../inventory/entities/product.entity';
 import { Stock } from '../../inventory/entities/stock.entity';
-import { StockMovement, MovementType } from '../../inventory/entities/stock-movement.entity'; // Importar
-import { CurrentAccountMovement, MovementType as FinMovementType, MovementConcept } from '../../finance/entities/current-account.entity'; // Importar
-import { Client } from '../entities/client.entity'; // Necesitamos buscar al cliente
+import { StockMovement, MovementType } from '../../inventory/entities/stock-movement.entity';
+import { CurrentAccountMovement, MovementType as FinMovementType, MovementConcept } from '../../finance/entities/current-account.entity';
+import { Client } from '../entities/client.entity';
 import { User } from '../../users/entities/user.entity';
 import { CashService } from 'src/modules/finance/services/cash.service';
 import { TransactionType, TransactionConcept } from '../../finance/entities/cash-transaction.entity';
 import { CheckStatus, CheckType } from 'src/modules/finance/entities/check.entity';
 import { ChecksService } from 'src/modules/finance/services/checks.service';
+// 👇 1. IMPORTAR LA CONFIGURACIÓN
+import { TenantConfig } from '../../tenants/entities/tenant-config.entity';
 
 @Injectable()
 export class SalesService {
@@ -23,26 +25,31 @@ export class SalesService {
 
     async create(dto: CreateSaleDto, tenantId: string, user: User) {
 
-        // 1. VALIDACIÓN: Si no hay sucursal, no se puede vender (no sabemos de dónde descontar)
         if (!user.branch) {
             throw new BadRequestException('El usuario no tiene una sucursal asignada para descontar stock.');
         }
 
         return this.dataSource.transaction(async (manager) => {
 
-            // --- A. VALIDACIÓN CLIENTE (Si es Cuenta Corriente) ---
+            // 👇 2. OBTENER LA CONFIGURACIÓN (DENTRO DE LA TRANSACCIÓN)
+            // Buscamos si "allow_negative_stock" es true o false
+            const config = await manager.findOne(TenantConfig, { 
+                where: { tenant: { id: tenantId } } 
+            });
+            // Por defecto es FALSE (no permitir) si no existe config
+            const allowNegativeStock = config?.allow_negative_stock ?? false;
+
+            // --- A. VALIDACIÓN CLIENTE ---
             let client: Client | null = null;
             if (dto.payment_method === PaymentMethod.CURRENT_ACCOUNT) {
                 if (!dto.customer_tax_id) {
                     throw new BadRequestException('Para vender en Cuenta Corriente, se requiere el CUIT/DNI del cliente.');
                 }
-                // Buscamos el cliente para asignarle la deuda
                 client = await manager.findOne(Client, {
                     where: { tax_id: dto.customer_tax_id, tenant: { id: tenantId } }
                 });
 
                 if (!client) {
-                    // Opcional: Podríamos crearlo automáticamente aquí, pero por seguridad mejor error.
                     throw new NotFoundException(`Cliente con CUIT ${dto.customer_tax_id} no encontrado. Regístrelo antes de fiar.`);
                 }
             }
@@ -61,35 +68,55 @@ export class SalesService {
                 const price = Number(product.sale_price);
                 const name = product.name;
 
-                // Solo descontamos stock si NO es un presupuesto
                 if (dto.type !== SaleType.PRESUPUESTO) {
-                    const stockRecord = await manager.findOne(Stock, {
+                    let stockRecord = await manager.findOne(Stock, {
                         where: {
                             product: { id: product.id },
                             branch: { id: user.branch?.id }
                         }
                     });
 
-                    if (!stockRecord) throw new BadRequestException(`No hay registro de stock para ${name} en esta sucursal`);
+                    // 👇 LÓGICA REESTRUCTURADA PARA TYPESCRIPT 🤓
+                    if (!stockRecord) {
+                        // Si no existe y NO permitimos negativos -> ERROR
+                        if (!allowNegativeStock) {
+                            throw new BadRequestException(`No hay registro de stock inicializado para ${name} en esta sucursal.`);
+                        }
 
-                    if (Number(stockRecord.quantity) < item.quantity) {
-                        throw new BadRequestException(`Stock insuficiente para ${name}. Disponibles: ${stockRecord.quantity}`);
+                        // Si permitimos negativos -> CREAMOS LA INSTANCIA (Sin guardar aún)
+                        // Usamos getRepository(Stock).create() para evitar conflictos de tipos
+                        stockRecord = manager.getRepository(Stock).create({
+                            product: { id: product.id },
+                            branch: { id: user.branch!.id }, // El ! asegura que branch existe (ya lo validamos al inicio)
+                            quantity: 0
+                        });
                     }
 
-                    // 1. Descontar Stock Físico
+                    // A este punto, stockRecord YA NO ES NULL (O lo encontramos o lo creamos)
+                    // TypeScript ahora sabrá que existe.
+
+                    // 2. Validación de Stock Negativo
+                    // Usamos Number() por si viene como string de la DB (decimal)
+                    if (!allowNegativeStock && Number(stockRecord.quantity) < item.quantity) {
+                        throw new BadRequestException(`Stock insuficiente para ${name}. Disponibles: ${stockRecord.quantity}.`);
+                    }
+
+                    // 3. Restar stock
                     stockRecord.quantity = Number(stockRecord.quantity) - item.quantity;
+                    
+                    // 4. Guardar (Aquí se hace el INSERT o UPDATE real)
                     await manager.save(stockRecord);
 
-                    // 2. Generar Movimiento de Stock (KARDEX) - ¡CRÍTICO PARA TRAZABILIDAD!
+                    // Generar Movimiento de Stock (KARDEX)
                     const movement = manager.create(StockMovement, {
-                        type: MovementType.OUT, // Salida
+                        type: MovementType.OUT,
                         quantity: item.quantity,
-                        reason: `Venta`, // Se completará con el ID de venta al final si quieres, o "Venta Mostrador"
+                        reason: `Venta`,
                         product: product,
-                        branch: user.branch!, // Usamos la entidad completa si es posible
+                        branch: user.branch!,
                         tenant: { id: tenantId } as any,
                         user: user,
-                        historical_cost: product.cost_price || 0 // Guardamos costo histórico
+                        historical_cost: product.cost_price || 0
                     });
                     await manager.save(movement);
                 }
@@ -123,21 +150,20 @@ export class SalesService {
 
             const savedSale = await manager.save(sale);
 
-            if (dto.payment_method === PaymentMethod.CASH) { // Usar Enum mejor que string 'EFECTIVO'
+            if (dto.payment_method === PaymentMethod.CASH) {
                 try {
                     await this.cashService.addTransaction({
                         type: TransactionType.IN,
                         concept: TransactionConcept.SALE,
                         amount: totalAmount,
                         description: `Venta #${savedSale.invoice_number}`
-                    }, user, manager); // <--- ¡AQUÍ ESTÁ LA CLAVE! Pasamos el manager
+                    }, user, manager); 
 
-                } catch (error) {
+                } catch (error: any) {
                     throw new BadRequestException('No se puede cobrar en EFECTIVO: ' + error.message);
                 }
             }
 
-            // Guardamos los detalles vinculados a la venta
             for (const detail of detailsToSave) {
                 detail.sale = savedSale;
                 await manager.save(detail);
@@ -148,11 +174,6 @@ export class SalesService {
                     throw new BadRequestException('Faltan los datos del cheque (banco, número, fecha cobro).');
                 }
 
-                // Si hay cliente identificado, generamos primero la DEUDA (Venta) para que el cheque la cancele.
-                // Así queda en la cuenta corriente:
-                // 1. Debe: $100 (Venta)
-                // 2. Haber: $100 (Cheque)
-                // Saldo: 0.
                 if (client) {
                     const saleDebt = manager.create(CurrentAccountMovement, {
                         tenant: { id: tenantId } as any,
@@ -167,26 +188,25 @@ export class SalesService {
                     await manager.save(saleDebt);
                 }
 
-                // Creamos el Cheque en Cartera (Estado PENDING)
                 await this.checkService.create({
                     number: dto.check_details.number,
                     bank_name: dto.check_details.bank_name,
-                    amount: dto.check_details.amount || totalAmount, // Usamos monto del cheque o total venta
-                    issue_date: new Date(), // Asumimos emitido hoy
+                    amount: dto.check_details.amount || totalAmount,
+                    issue_date: new Date(),
                     payment_date: new Date(dto.check_details.payment_date),
                     type: CheckType.THIRD_PARTY,
                     status: CheckStatus.PENDING,
-                    client_id: client ? client.id : undefined, // Vinculamos al cliente si existe
+                    client_id: client ? client.id : undefined,
                     drawer_name: client ? client.name : (dto.customer_name || 'Cliente Mostrador')
-                }, tenantId, manager); // 👈 Pasamos manager para que sea atómico
+                }, tenantId, manager);
             }
 
-            // --- D. IMPACTO EN CUENTA CORRIENTE (Si aplica) ---
+            // --- D. IMPACTO EN CUENTA CORRIENTE ---
             if (dto.type === SaleType.VENTA && dto.payment_method === PaymentMethod.CURRENT_ACCOUNT && client) {
                 const debtMovement = manager.create(CurrentAccountMovement, {
                     tenant: { id: tenantId } as any,
                     client: client,
-                    type: FinMovementType.DEBIT, // Aumenta la deuda del cliente
+                    type: FinMovementType.DEBIT,
                     concept: MovementConcept.SALE,
                     amount: totalAmount,
                     description: `Venta #${savedSale.invoice_number} (Fiado)`,
@@ -205,7 +225,7 @@ export class SalesService {
         });
     }
 
-    // ... (El resto de métodos findAll y findOne quedan igual)
+    // ... Resto de métodos (findAll, findOne) quedan igual ...
     async findAll(tenantId: string, branchId?: string, type?: string) {
         const query = this.dataSource.getRepository(Sale)
             .createQueryBuilder('sale')

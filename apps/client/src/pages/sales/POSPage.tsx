@@ -180,14 +180,24 @@ export const POSPage = () => {
 
   // --- LOGICA CARRITO (Igual que antes) ---
   const addToCart = (product: Product, qty: number = 1) => {
-    if (saleType === "VENTA" && product.stock <= 0) {
+    // 👇 LEEMOS LA CONFIGURACIÓN
+    const allowNegative = settings.allow_negative_stock;
+
+    // 👇 SOLO BLOQUEAMOS SI LA CONFIGURACIÓN DICE "FALSE" (NO PERMITIR)
+    if (saleType === "VENTA" && product.stock <= 0 && !allowNegative) {
       showNotification("¡Sin stock!", "error");
       return;
     }
+
     setCart((prev) => {
       const existing = prev.find((item) => item.id === product.id);
       if (existing) {
-        if (saleType === "VENTA" && existing.quantity + qty > product.stock) {
+        // 👇 AQUÍ TAMBIÉN AGREGAMOS EL "!allowNegative"
+        if (
+          saleType === "VENTA" &&
+          existing.quantity + qty > product.stock &&
+          !allowNegative
+        ) {
           showNotification("Tope stock", "warning");
           return prev;
         }
@@ -209,12 +219,16 @@ export const POSPage = () => {
   };
 
   const updateQuantity = (id: string, delta: number) => {
+    const allowNegative = settings.allow_negative_stock; // 👇 Leemos config
+
     setCart((prev) =>
       prev.map((item) => {
         if (item.id === id) {
           const newQty = item.quantity + delta;
           if (newQty < 1) return item;
-          if (saleType === "VENTA" && newQty > item.stock) {
+
+          // 👇 SOLO BLOQUEAMOS SI NO SE PERMITE NEGATIVO
+          if (saleType === "VENTA" && newQty > item.stock && !allowNegative) {
             showNotification("Tope stock", "warning");
             return item;
           }
@@ -458,44 +472,53 @@ export const POSPage = () => {
 
         <Box sx={{ flex: 1, overflowY: "auto" }}>
           <Grid container spacing={2}>
-            {filteredProducts.map((p) => (
-              <Grid item xs={12} sm={6} md={4} lg={3} key={p.id}>
-                <Card
-                  sx={{
-                    opacity: saleType === "VENTA" && p.stock <= 0 ? 0.6 : 1,
-                    bgcolor:
-                      saleType === "VENTA" && p.stock <= 0
-                        ? "#f5f5f5"
-                        : "white",
-                  }}
-                >
-                  <CardActionArea
-                    onClick={() => addToCart(p)}
-                    disabled={saleType === "VENTA" && p.stock <= 0}
+            {filteredProducts.map((p) => {
+              // 1. Aquí definimos si se bloquea o no (YA LO TIENES BIEN)
+              const isBlocked =
+                saleType === "VENTA" &&
+                p.stock <= 0 &&
+                !settings.allow_negative_stock;
+
+              return (
+                <Grid item xs={12} sm={6} md={4} lg={3} key={p.id}>
+                  <Card
+                    sx={{
+                      // 👇 2. USAR isBlocked AQUÍ
+                      opacity: isBlocked ? 0.6 : 1,
+                      bgcolor: isBlocked ? "#f5f5f5" : "white",
+                    }}
                   >
-                    <CardContent>
-                      <Typography variant="h6" noWrap>
-                        {p.name}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Stock: {p.stock}
-                      </Typography>
-                      <Typography
-                        variant="h5"
-                        color="primary"
-                        fontWeight="bold"
-                        mt={1}
-                      >
-                        ${p.price.toLocaleString()}
-                      </Typography>
-                      {saleType === "VENTA" && p.stock <= 0 && (
-                        <Chip label="AGOTADO" color="error" size="small" />
-                      )}
-                    </CardContent>
-                  </CardActionArea>
-                </Card>
-              </Grid>
-            ))}
+                    <CardActionArea
+                      onClick={() => addToCart(p)}
+                      // 👇 3. USAR isBlocked AQUÍ (Esto es lo que impide el click)
+                      disabled={isBlocked}
+                    >
+                      <CardContent>
+                        <Typography variant="h6" noWrap>
+                          {p.name}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Stock: {p.stock}
+                        </Typography>
+                        <Typography
+                          variant="h5"
+                          color="primary"
+                          fontWeight="bold"
+                          mt={1}
+                        >
+                          ${p.price.toLocaleString()}
+                        </Typography>
+
+                        {/* 👇 4. USAR isBlocked AQUÍ TAMBIÉN (Para mostrar u ocultar el cartel) */}
+                        {isBlocked && (
+                          <Chip label="AGOTADO" color="error" size="small" />
+                        )}
+                      </CardContent>
+                    </CardActionArea>
+                  </Card>
+                </Grid>
+              );
+            })}
           </Grid>
         </Box>
       </Box>
