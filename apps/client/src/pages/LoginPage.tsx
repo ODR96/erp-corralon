@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate, Link as RouterLink } from "react-router-dom"; // <--- 1. Importar Hook de navegación
+import { useState, useEffect } from "react";
+import { useNavigate, Link as RouterLink } from "react-router-dom";
 import {
   Box,
   Button,
@@ -13,7 +13,7 @@ import {
   Avatar,
   Alert,
   Link,
-  Grid, // <--- 2. Importar Alert para errores
+  Grid,
 } from "@mui/material";
 import { Visibility, VisibilityOff, LockOutlined } from "@mui/icons-material";
 import { authService } from "../services/api"; // <--- 3. Importar nuestro servicio
@@ -25,6 +25,12 @@ export const LoginPage = () => {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState(""); // Estado para guardar errores (ej: "Pass incorrecta")
+
+  useEffect(() => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    // Si usas cookies también podrías necesitar borrarlas, pero con localStorage suele bastar.
+  }, []);
 
   const handleClickShowPassword = () => setShowPassword((show) => !show);
 
