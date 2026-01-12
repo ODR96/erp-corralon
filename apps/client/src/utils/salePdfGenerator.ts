@@ -45,6 +45,10 @@ const generateTicket80mm = (doc: jsPDF, data: any, items: any[], settings: any, 
     const margin = 2;
     let y = 5;
     
+const fantasyName = settings?.fantasy_name || settings?.fantasyName || 'MI NEGOCIO';
+    const address = settings?.address || settings?.company_address || settings?.companyAddress || '';
+    const phone = settings?.phone || settings?.phone_number || settings?.phoneNumber || '';
+
     // Helper para centrar
     const centerText = (text: string, yPos: number, size = 10, weight = 'normal') => {
         doc.setFontSize(size);
@@ -53,10 +57,10 @@ const generateTicket80mm = (doc: jsPDF, data: any, items: any[], settings: any, 
     };
 
     // 1. CABECERA
-    centerText(settings?.fantasy_name || 'MI NEGOCIO', y, 12, 'bold');
+    centerText(fantasyName.toUpperCase(), y, 12, 'bold');
     y += 5;
-    if (settings?.address) { centerText(settings.address, y, 8); y += 4; }
-    if (settings?.phone) { centerText(`Tel: ${settings.phone}`, y, 8); y += 4; }
+    if (address) { centerText(address, y, 8); y += 4; }
+    if (phone) { centerText(`Tel: ${phone}`, y, 8); y += 4; }
     
     doc.setDrawColor(0);
     doc.line(margin, y, 78, y);
@@ -68,14 +72,20 @@ const generateTicket80mm = (doc: jsPDF, data: any, items: any[], settings: any, 
     
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Fecha: ${new Date().toLocaleDateString('es-AR')} ${new Date().toLocaleTimeString('es-AR')}`, margin, y);
+    doc.text(`Fecha: ${new Date(data.created_at || new Date()).toLocaleDateString('es-AR')}`, margin, y);
     y += 4;
     
     // 3. ÍTEMS
-    const tableBody = items.map(item => [
-        `${item.quantity} x ${item.name.substring(0, 15)}`, 
-        `$${item.subtotal.toLocaleString('es-AR')}`
-    ]);
+    const tableBody = items.map(item => {
+        // 👇 AQUI LA CORRECCIÓN: Buscamos name O product_name
+        const name = item.name || item.product_name || 'Producto';
+        const subtotal = Number(item.subtotal || 0);
+        
+        return [
+            `${item.quantity} x ${name.substring(0, 15)}`, 
+            `$${subtotal.toLocaleString('es-AR')}`
+        ];
+    });
 
     autoTable(doc, {
         startY: y,
@@ -92,24 +102,29 @@ const generateTicket80mm = (doc: jsPDF, data: any, items: any[], settings: any, 
     // 4. TOTAL
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
-    doc.text(`TOTAL: $${data.total.toLocaleString('es-AR')}`, 75, y, { align: 'right' });
+    const total = Number(data.total || 0);
+    doc.text(`TOTAL: $${total.toLocaleString('es-AR')}`, 75, y, { align: 'right' });
 };
 
 const generateA4 = (doc: jsPDF, data: any, items: any[], settings: any, isBudget: boolean) => {
     const pageWidth = doc.internal.pageSize.width;
-    
+
+const fantasyName = settings?.fantasy_name || settings?.fantasyName || 'MI EMPRESA';
+    const address = settings?.address || settings?.company_address || settings?.companyAddress || '';
+    const phone = settings?.phone || settings?.phone_number || settings?.phoneNumber || '';
+
     // CABECERA
     doc.setFontSize(22);
     doc.setFont('helvetica', 'bold');
-    doc.text((settings?.fantasy_name || 'MI EMPRESA').toUpperCase(), 14, 20);
+    doc.text(fantasyName.toUpperCase(), 14, 20);
 
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100);
     
     let yHeader = 26;
-    if (settings?.address) { doc.text(settings.address, 14, yHeader); yHeader += 5; }
-    if (settings?.phone) { doc.text(`Tel: ${settings.phone}`, 14, yHeader); yHeader += 5; }
+    if (address) { doc.text(address, 14, yHeader); yHeader += 5; }
+    if (phone) { doc.text(`Tel: ${phone}`, 14, yHeader); yHeader += 5; }
 
     // Título
     doc.setFontSize(24);
@@ -119,7 +134,8 @@ const generateA4 = (doc: jsPDF, data: any, items: any[], settings: any, isBudget
 
     doc.setFontSize(10);
     doc.setTextColor(0);
-    doc.text(`Fecha: ${new Date().toLocaleDateString('es-AR')}`, pageWidth - 14, 30, { align: 'right' });
+    const dateStr = new Date(data.created_at || new Date()).toLocaleDateString('es-AR');
+    doc.text(`Fecha: ${dateStr}`, pageWidth - 14, 30, { align: 'right' });
     if(data.invoice_number) doc.text(`N°: #${data.invoice_number}`, pageWidth - 14, 35, { align: 'right' });
 
     // Cliente
@@ -129,12 +145,20 @@ const generateA4 = (doc: jsPDF, data: any, items: any[], settings: any, isBudget
     if(data.customer_tax_id) doc.text(`CUIT/DNI: ${data.customer_tax_id}`, 14, 57);
 
     // Tabla
-    const tableRows = items.map(item => [
-        item.quantity,
-        item.name,
-        `$${item.price.toLocaleString('es-AR')}`,
-        `$${item.subtotal.toLocaleString('es-AR')}`
-    ]);
+    const tableRows = items.map(item => {
+        // 👇 AQUÍ LA CORRECCIÓN CLAVE:
+        // El precio puede venir como 'price' (POS) o 'unit_price' (DB)
+        const price = Number(item.price || item.unit_price || 0);
+        const name = item.name || item.product_name || 'Producto';
+        const subtotal = Number(item.subtotal || 0);
+
+        return [
+            item.quantity,
+            name,
+            `$${price.toLocaleString('es-AR')}`,     // Ahora es seguro
+            `$${subtotal.toLocaleString('es-AR')}`   // Ahora es seguro
+        ];
+    });
 
     autoTable(doc, {
         startY: 65,
@@ -148,5 +172,6 @@ const generateA4 = (doc: jsPDF, data: any, items: any[], settings: any, isBudget
     const finalY = (doc as any).lastAutoTable.finalY + 10;
     doc.setFontSize(16);
     doc.setFont('helvetica', 'bold');
-    doc.text(`TOTAL: $${data.total.toLocaleString('es-AR')}`, pageWidth - 14, finalY, { align: 'right' });
+    const total = Number(data.total || 0);
+    doc.text(`TOTAL: $${total.toLocaleString('es-AR')}`, pageWidth - 14, finalY, { align: 'right' });
 };

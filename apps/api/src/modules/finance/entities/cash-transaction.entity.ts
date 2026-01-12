@@ -14,7 +14,9 @@ export enum TransactionConcept {
     WITHDRAWAL = 'WITHDRAWAL',     // Retiro de Socio
     PROVIDER_PAYMENT = 'PROVIDER', // Pago a Proveedor
     ADJUSTMENT = 'ADJUSTMENT',     // Ajuste manual
-    CLOSING = 'CLOSING'            // Cierre
+    CLOSING = 'CLOSING',            // Cierre
+    REFUND = 'DEVOLUCION',
+    OTHER = 'OTRO'
 }
 
 @Entity('cash_transactions')

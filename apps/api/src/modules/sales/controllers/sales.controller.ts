@@ -30,4 +30,10 @@ export class SalesController {
     findOne(@Param('id') id: string) {
         return this.salesService.findOne(id);
     }
+
+    @Post(':id/cancel')
+    @RequirePermissions('sales.create') // O un permiso específico 'sales.cancel' si prefieres
+    cancel(@Param('id') id: string, @Request() req: any) {
+        return this.salesService.cancel(id, req.user);
+    }
 }

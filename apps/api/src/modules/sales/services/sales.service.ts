@@ -249,4 +249,86 @@ export class SalesService {
             relations: ['details', 'details.product', 'user', 'branch']
         });
     }
+
+    async cancel(saleId: string, user: User) {
+        return this.dataSource.transaction(async (manager) => {
+            // 1. Buscar la venta con sus detalles
+            const sale = await manager.findOne(Sale, {
+                where: { id: saleId },
+                relations: ['details', 'details.product', 'branch'],
+            });
+
+            if (!sale) throw new NotFoundException('Venta no encontrada');
+            if (sale.status === 'CANCELLED') throw new BadRequestException('Esta venta ya fue anulada');
+
+            // 2. Devolver Stock (Iterar por cada ítem)
+            for (const detail of sale.details) {
+                // Busamos el stock en la sucursal original de la venta
+                const stock = await manager.findOne(Stock, {
+                    where: {
+                        product: { id: detail.product.id },
+                        branch: { id: sale.branch.id } 
+                    }
+                });
+
+                if (stock) {
+                    // Aumentamos el stock (Devolución)
+                    stock.quantity = Number(stock.quantity) + Number(detail.quantity);
+                    await manager.save(stock);
+
+                    // Registrar en Kardex
+                    const movement = manager.create(StockMovement, {
+                        type: MovementType.IN, // ENTRADA
+                        quantity: detail.quantity,
+                        reason: `Anulación Venta #${sale.invoice_number}`,
+                        product: detail.product,
+                        branch: sale.branch,
+                        tenant: sale.tenant, // Asumimos que la entidad venta tiene tenant cargado o lo sacamos del user
+                        user: user,
+                        historical_cost: detail.product.cost_price || 0
+                    });
+                    await manager.save(movement);
+                }
+            }
+
+            // 3. Reversar Dinero / Deuda
+            if (sale.payment_method === PaymentMethod.CASH) {
+                // Sacamos plata de la caja (Egreso por Devolución)
+                await this.cashService.addTransaction({
+                    type: TransactionType.OUT,
+                    concept: TransactionConcept.REFUND, // O 'REFUND' si lo tienes en el enum
+                    amount: Number(sale.total),
+                    description: `Devolución Venta #${sale.invoice_number}`
+                }, user, manager);
+            } 
+            else if (sale.payment_method === PaymentMethod.CURRENT_ACCOUNT && sale.customer_tax_id) {
+                // Buscamos al cliente para devolverle el crédito
+                const client = await manager.findOne(Client, { 
+                    where: { tax_id: sale.customer_tax_id, tenant: { id: user.tenant.id } } 
+                });
+                
+                if (client) {
+                    const credit = manager.create(CurrentAccountMovement, {
+                        tenant: { id: user.tenant.id } as any,
+                        client: client,
+                        type: FinMovementType.CREDIT, // A favor del cliente (baja su deuda)
+                        concept: MovementConcept.PAYMENT, // O un concepto nuevo 'RETURN'
+                        amount: Number(sale.total),
+                        description: `Anulación Venta #${sale.invoice_number}`,
+                        date: new Date(),
+                        reference_id: sale.id
+                    });
+                    await manager.save(credit);
+                }
+            }
+            // NOTA: Para Cheques o Tarjetas, por ahora solo anulamos la venta lógica. 
+            // El usuario deberá romper el cheque o anular el cupón manualmente.
+
+            // 4. Marcar Venta como Anulada
+            sale.status = 'CANCELLED';
+            await manager.save(sale);
+
+            return { message: `Venta #${sale.invoice_number} anulada correctamente` };
+        });
+    }
 }

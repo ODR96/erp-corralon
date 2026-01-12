@@ -27,6 +27,7 @@ import { POSPage } from "./pages/sales/POSPage";
 import { CashPage } from "./pages/finance/CashPage";
 import { ExpensesPage } from "./pages/finance/ExpensesPage";
 import DashboardPage from "./pages/DashboardPage";
+import { SalesHistoryPage } from "./pages/sales/SalesHistoryPage";
 
 function App() {
   return (
@@ -74,6 +75,7 @@ function App() {
                   path="/inventory/purchases/new"
                   element={<NewPurchasePage />}
                 />
+                <Route path="/sales" element={<SalesHistoryPage />} />
               </Route>
 
               {/* 4. PROVEEDORES (Requiere 'providers.manage') */}
