@@ -313,6 +313,14 @@ export class ProductsService {
         columnMap?: any,
         defaults?: { categoryId?: string; unitId?: string; margin?: number; vat?: number; discount?: number; skuPrefix?: string }
     ) {
+
+        console.log("----------------------------------------------");
+        console.log("📦 IMPORTANDO EXCEL - DEBUG DEFAULTS");
+        console.log("VALOR DE DEFAULTS RECIBIDO:", JSON.stringify(defaults));
+        console.log("VALOR EXACTO DE VAT:", defaults?.vat);
+        console.log("TIPO DE VAT:", typeof defaults?.vat);
+        console.log("----------------------------------------------");
+
         const workbook = XLSX.read(file.buffer, { type: 'buffer' });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         // Usamos raw: false para leer lo que ve el usuario, defval para no perder columnas
@@ -425,24 +433,25 @@ export class ProductsService {
                 const rawCurr = map.currency !== undefined ? row[map.currency] : null;
 
                 // IVA y Moneda
-                let vatRate = 21; // Por defecto siempre 21
+                let defaultVatValue = 21; // Valor por defecto del sistema
 
-                // Si viene un default válido (incluyendo el número 0 o string "0")
-                if (defaults?.vat !== undefined && defaults?.vat !== null && String(defaults.vat).trim() !== '') {
-                    const defV = Number(defaults.vat);
-                    if (!isNaN(defV)) vatRate = defV;
+                if (defaults && defaults.vat !== undefined && defaults.vat !== null) {
+                    // Truco: Convertimos a string y luego a numero para evitar falsys
+                    const val = Number(defaults.vat);
+                    if (!isNaN(val)) {
+                        defaultVatValue = val;
+                    }
                 }
 
-                // 2. Revisar si el Excel tiene un dato específico para esta fila
-                if (rawVat !== null && rawVat !== undefined) {
-                    // Convertimos a string para verificar que no esté vacío (ej: celdas vacías)
-                    const strVat = String(rawVat).trim();
+                let vatRate = defaultVatValue; // Asignamos el default encontrado
 
+                // 2. Revisar si la celda del Excel tiene algo escrito
+                if (rawVat !== null && rawVat !== undefined) {
+                    const strVat = String(rawVat).trim();
                     if (strVat !== '') {
                         const v = cleanPrice(rawVat);
-                        // Filtro: Solo aplicamos si es un número válido entre 0 y 100
-                        // (Esto permite el 0 explícito)
-                        if (!isNaN(v) && v >= 0 && v <= 100) {
+                        // Solo sobrescribimos si es un número válido
+                        if (!isNaN(v) && v >= 0) {
                             vatRate = v;
                         }
                     }
