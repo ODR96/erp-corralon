@@ -13,6 +13,7 @@
   "packageManager": "pnpm@10.26.0",
   "dependencies": {
     "@nestjs/mapped-types": "^2.1.0",
+    "afip.ts": "^3.2.2",
     "jspdf": "^3.0.4",
     "jspdf-autotable": "^5.0.2"
   }

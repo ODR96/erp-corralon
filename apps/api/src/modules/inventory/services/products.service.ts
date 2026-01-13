@@ -426,7 +426,7 @@ export class ProductsService {
 
                 // IVA y Moneda
                 let vatRate = defaults?.vat ?? 21;
-                if (rawVat) {
+                if (rawVat !== null && rawVat !== undefined && rawVat !== '') { 
                     const v = cleanPrice(rawVat);
                     // Filtro anti-locura: IVA entre 0 y 100
                     if (v >= 0 && v <= 100) vatRate = v;

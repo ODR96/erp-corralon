@@ -1,93 +1,160 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, OnModuleInit } from '@nestjs/common';
+import * as path from 'path';
+import * as fs from 'fs';
 
-// 🛡️ BLOQUE DE SEGURIDAD
-// Intentamos importar la librería. Si no está instalada, no explotamos.
-let Afip: any;
-try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    Afip = require('afip.js');
-} catch (e) {
-    Afip = null; // No pasa nada, usaremos el modo Mock
-}
+// 👇 Importamos la clase Afip
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { Afip } = require('afip.ts');
 
 @Injectable()
-export class AfipService {
+export class AfipService implements OnModuleInit {
     private afip: any;
+    private useMock: boolean = false; 
 
-    // 👇 FORZAMOS EL MOCK: Así puedes trabajar YA MISMO sin certificados ni librerías
-    private useMock: boolean = true;
+    // 👇 TU CUIT DE DESARROLLADOR
+    private readonly CUIT_ORIGEN = 20393198487; 
 
-    constructor() {
-        // Solo intentamos conectar con AFIP si tenemos la librería Y los certificados Y apagamos el mock
-        if (!this.useMock && Afip) {
-            try {
-                this.afip = new Afip({
-                    CUIT: 20111111112,
-                    cert: './src/assets/afip/cert.crt',
-                    key: './src/assets/afip/private.key',
-                    production: false,
-                });
-            } catch (error) {
-                console.warn("⚠️ AFIP no configurado. Pasando a modo MOCK automático.");
+    async onModuleInit() {
+        if (this.useMock) return;
+
+        try {
+            const certPath = path.join(process.cwd(), 'apps/api/src/assets/afip/cert.crt');
+            const keyPath = path.join(process.cwd(), 'apps/api/src/assets/afip/private.key');
+
+            if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) {
+                console.warn('⚠️ Certificados AFIP no encontrados. Usando MOCK.');
                 this.useMock = true;
+                return;
             }
-        } else {
-            this.useMock = true; // Si no hay librería, usamos Mock sí o sí
+
+            console.log("🔐 Inicializando AFIP (afip.ts)...");
+
+            this.afip = new Afip({
+                cuit: this.CUIT_ORIGEN,
+                cert: fs.readFileSync(certPath, 'utf8'),
+                key: fs.readFileSync(keyPath, 'utf8'),
+                production: false, // Testing
+                resFolder: path.join(process.cwd(), 'apps/api/src/assets/afip')
+            });
+
+            console.log('✅ Conexión AFIP Inicializada Correctamente');
+
+        } catch (error) {
+            console.error("❌ Error inicializando AFIP:", error.message);
+            this.useMock = true;
         }
     }
 
     async getPersonData(cuit: string) {
-        // 1. Validar formato básico (solo números)
         const cleanCuit = cuit.replace(/[^0-9]/g, '');
+        if (cleanCuit.length !== 11) throw new BadRequestException('CUIT inválido');
 
-        if (cleanCuit.length !== 11) {
-            throw new BadRequestException('El CUIT debe tener 11 dígitos numéricos');
-        }
-
-        // 🎭 MODO SIMULACIÓN (Esto es lo que vas a usar hoy)
         if (this.useMock) {
-            console.log(`🤖 Consultando Mock AFIP para: ${cleanCuit}`);
-
-            // Simulamos 1.5 segundos de espera para que veas el spinner en el frontend
-            await new Promise(resolve => setTimeout(resolve, 1500));
-
-            // Simulamos un error si el CUIT termina en 9 (para probar alertas de error)
-            if (cleanCuit.endsWith('9')) {
-                throw new BadRequestException('CUIT no encontrado en padrón (Simulado)');
-            }
-
-            // Devolvemos datos ficticios pero útiles
+            await new Promise(resolve => setTimeout(resolve, 1000));
             return {
-                name: "CONSTRUCTORA MODELO S.R.L.",
+                name: "MOCK USER S.A.",
                 tax_id: cleanCuit,
-                tax_condition: "RI", // Responsable Inscripto
-                address: "AV. SIEMPRE VIVA 742, FORMOSA",
-                is_mock: true // Bandera para que sepas que es dato falso
+                tax_condition: "RI",
+                address: "CALLE FALSA 123",
+                is_mock: true
             };
         }
 
-        // 🏢 MODO REAL (Este código quedará dormido hasta que instales la librería)
         try {
-            if (!this.afip) throw new Error('Librería no inicializada');
+            console.log(`🔍 Buscando CUIT ${cleanCuit} en AFIP...`);
+            const data = await this.afip.registerScopeFiveService.getTaxpayerDetails(parseFloat(cleanCuit));
+            
+            // 👇 ESTO ES CLAVE: Muestra en la consola qué devolvió AFIP realmente
+            console.log("📦 RESPUESTA AFIP RAW:", JSON.stringify(data, null, 2));
 
-            const data = await this.afip.RegisterScopeFive.getTaxpayerDetails(cleanCuit);
-            if (!data) throw new Error('No data');
+            if (!data) throw new Error('No se encontraron datos');
 
-            const datos = data.datosGenerales;
+            // Normalización: A veces viene en data.datosGenerales, a veces directo en data
+            const datos = data.datosGenerales || data; 
+            
+            // 1. Resolver NOMBRE (Evitar "undefined undefined")
+            let name = 'Nombre Desconocido';
+            if (datos.razonSocial) {
+                name = datos.razonSocial;
+            } else if (datos.apellido || datos.nombre) {
+                name = `${datos.nombre || ''} ${datos.apellido || ''}`.trim();
+            }
+
+            // 2. Resolver DIRECCIÓN
+            let address = 'Domicilio Fiscal Desconocido';
+            const dom = datos.domicilioFiscal;
+            if (dom) {
+                // A veces la dirección viene simple o en partes
+                const calle = dom.direccion || '';
+                const loc = dom.localidad || '';
+                const prov = dom.descripcionProvincia || '';
+                address = `${calle} ${loc} ${prov}`.trim();
+            }
+
+            // 3. Resolver Condición Fiscal
             let condition = 'CF';
-            if (datos.tipoClave === '20') condition = 'RI';
-            if (data.datosMonotributo) condition = 'MT';
+            if (datos.tipoClave === '20') condition = 'RI'; // Responsable Inscripto
+            if (data.datosMonotributo) condition = 'MT'; // Monotributo
+            if (datos.estadoClave === 'NO ACTIVO') condition = 'EX'; 
 
             return {
-                name: datos.razonSocial || `${datos.apellido} ${datos.nombre}`,
-                tax_id: datos.idPersona,
+                name: name,
+                tax_id: datos.idPersona || cleanCuit,
                 tax_condition: condition,
-                address: datos.domicilioFiscal?.direccion || '',
+                address: address !== '' ? address : 'Domicilio no informado',
                 is_mock: false
             };
         } catch (error) {
-            console.error(error);
-            throw new BadRequestException('Error consultando servicio de AFIP');
+            console.error('❌ Error AFIP getPersonData:', error);
+            throw new BadRequestException('Error consultando AFIP: ' + (error.message || 'Desconocido'));
+        }
+    }
+
+    async createVoucher(data: any) {
+        if (this.useMock) {
+            return {
+                cae: '99999999999999',
+                cae_due_date: new Date(),
+                voucher_number: (data.last_voucher || 0) + 1
+            };
+        }
+
+        try {
+            const date = new Date();
+            // Fecha formato YYYYMMDD número entero
+            const formattedDate = parseInt(date.toISOString().slice(0, 10).replace(/-/g, ''));
+
+            const payload = {
+                CantReg: 1,
+                PtoVta: data.point_of_sale || 1,
+                CbteTipo: data.invoice_type || 6, 
+                Concepto: 1,
+                DocTipo: data.customer_doc_type || 99,
+                DocNro: data.customer_doc_number || 0,
+                CbteDesde: data.last_voucher + 1,
+                CbteHasta: data.last_voucher + 1,
+                CbteFch: formattedDate, 
+                ImpTotal: data.total,
+                ImpTotConc: 0,
+                ImpNeto: data.net_amount,
+                ImpOpEx: 0,
+                ImpTrib: 0,
+                ImpIVA: data.vat_amount,
+                MonId: 'PES',
+                MonCotiz: 1,
+            };
+
+            // 👇 CORRECCIÓN: Usamos 'electronicBillingService'
+            const res = await this.afip.electronicBillingService.createVoucher(payload);
+
+            return {
+                cae: res.CAE,
+                cae_due_date: res.CAEFchVto,
+                voucher_number: data.last_voucher + 1
+            };
+        } catch (error) {
+            console.error("Error Facturando AFIP:", error);
+            throw new BadRequestException('Falló la facturación AFIP: ' + (error.message || 'Error desconocido'));
         }
     }
 }

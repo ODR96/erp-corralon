@@ -17,9 +17,10 @@ import { ExpenseCategory } from './entities/expense-category.entity';
 import { Expense } from './entities/expense.entity';
 import { ExpensesController } from './controllers/expenses.controller';
 import { ExpensesService } from './services/expenses.service';
+import { User } from '../users/entities/user.entity';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([Check, CurrentAccountMovement, PaymentOrder, CashTransaction, CashRegister, ExpenseCategory,Expense])],
+    imports: [TypeOrmModule.forFeature([Check, CurrentAccountMovement, PaymentOrder, CashTransaction, CashRegister, ExpenseCategory, User, Expense])],
     controllers: [ChecksController, CurrentAccountController, PaymentsController, CashController, ExpensesController],
     providers: [ChecksService, CurrentAccountService, PaymentsService, CashService, ExpensesService],
     exports: [ChecksService, CurrentAccountService, CashService, ExpensesService]
