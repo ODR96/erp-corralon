@@ -72,25 +72,28 @@ export class ProductsController {
         @Request() req: any,
         @Body() body: any
     ) {
+
         const tenantId = req.user.tenant?.id;
         const columnMap = body.column_map ? JSON.parse(body.column_map) : null;
 
+        console.log("------------------------------------------------");
+        console.log("📨 BODY RAW RECIBIDO:", JSON.stringify(body, null, 2));
+        console.log("------------------------------------------------");
         // Empaquetamos los defaults
+        const parse = (val: any) => {
+            if (val === undefined || val === null || String(val).trim() === '') return undefined;
+            return Number(val);
+        };
+
         const defaults = {
             categoryId: body.default_category_id || undefined,
             unitId: body.default_unit_id || undefined,
 
-            // 👇 FIX: Permitimos el 0 explícitamente
-            margin: (body.default_margin !== undefined && body.default_margin !== '')
-                ? Number(body.default_margin)
-                : undefined,
+            // Usamos el helper limpio
+            margin: parse(body.default_margin),
+            vat: parse(body.default_vat),
+            discount: parse(body.default_discount), // ¡Arreglado para descuento 0 también!
 
-            // 👇 FIX: Esta era la línea culpable. Ahora acepta el 0.
-            vat: (body.default_vat !== undefined && body.default_vat !== '')
-                ? Number(body.default_vat)
-                : undefined,
-
-            discount: body.default_discount ? Number(body.default_discount) : undefined,
             skuPrefix: body.sku_prefix || undefined,
         };
 
