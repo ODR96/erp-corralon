@@ -323,9 +323,19 @@ export const inventoryService = {
         // Enviamos los defaults si existen
         if (defaults?.categoryId) formData.append('default_category_id', defaults.categoryId);
         if (defaults?.unitId) formData.append('default_unit_id', defaults.unitId);
-        if (defaults?.margin) formData.append('default_margin', defaults.margin);
-        if (defaults?.vat) formData.append('default_vat', defaults.vat);
-        if (defaults?.discount) formData.append('default_discount', defaults.discount);
+        if (defaults?.margin !== undefined && defaults?.margin !== '') {
+            formData.append('default_margin', defaults.margin);
+        }
+
+        // 👇 FIX: Aceptamos 0 en IVA (¡ESTE ERA EL CULPABLE!)
+        if (defaults?.vat !== undefined && defaults?.vat !== '') {
+            formData.append('default_vat', defaults.vat);
+        }
+
+        // 👇 FIX: Aceptamos 0 en Descuento
+        if (defaults?.discount !== undefined && defaults?.discount !== '') {
+            formData.append('default_discount', defaults.discount);
+        }
         if (defaults?.skuPrefix) formData.append('sku_prefix', defaults.skuPrefix); // 👈 AGREGAR
 
         const response = await api.post('/inventory/products/import/excel', formData, {
