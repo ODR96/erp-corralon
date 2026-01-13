@@ -65,31 +65,40 @@ export class ProductsController {
     }
 
     // Endpoint de importación actualizado
-@Post('import/excel')
+    @Post('import/excel')
     @UseInterceptors(FileInterceptor('file'))
     async import(
-        @UploadedFile() file: Express.Multer.File, 
+        @UploadedFile() file: Express.Multer.File,
         @Request() req: any,
-        @Body() body: any 
+        @Body() body: any
     ) {
         const tenantId = req.user.tenant?.id;
         const columnMap = body.column_map ? JSON.parse(body.column_map) : null;
-        
+
         // Empaquetamos los defaults
         const defaults = {
             categoryId: body.default_category_id || undefined,
             unitId: body.default_unit_id || undefined,
-            margin: body.default_margin ? Number(body.default_margin) : undefined,
-            vat: body.default_vat ? Number(body.default_vat) : undefined,
+
+            // 👇 FIX: Permitimos el 0 explícitamente
+            margin: (body.default_margin !== undefined && body.default_margin !== '')
+                ? Number(body.default_margin)
+                : undefined,
+
+            // 👇 FIX: Esta era la línea culpable. Ahora acepta el 0.
+            vat: (body.default_vat !== undefined && body.default_vat !== '')
+                ? Number(body.default_vat)
+                : undefined,
+
             discount: body.default_discount ? Number(body.default_discount) : undefined,
-            skuPrefix: body.sku_prefix || undefined, // 👈 NUEVO
+            skuPrefix: body.sku_prefix || undefined,
         };
 
         return this.productsService.importFromExcel(
-            file, 
-            tenantId, 
-            body.provider_id, 
-            columnMap, 
+            file,
+            tenantId,
+            body.provider_id,
+            columnMap,
             defaults
         );
     }
