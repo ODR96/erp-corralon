@@ -328,7 +328,7 @@ export const inventoryService = {
         }
 
         // 👇 FIX: Aceptamos 0 en IVA (¡ESTE ERA EL CULPABLE!)
-        if (defaults?.vat !== undefined && defaults?.vat !== '') {
+        if (defaults?.vat !== undefined && defaults?.vat !== null && String(defaults.vat) !== '') {
             formData.append('default_vat', defaults.vat);
         }
 
