@@ -425,12 +425,31 @@ export class ProductsService {
                 const rawCurr = map.currency !== undefined ? row[map.currency] : null;
 
                 // IVA y Moneda
-                let vatRate = defaults?.vat ?? 21;
-                if (rawVat !== null && rawVat !== undefined && rawVat !== '') { 
-                    const v = cleanPrice(rawVat);
-                    // Filtro anti-locura: IVA entre 0 y 100
-                    if (v >= 0 && v <= 100) vatRate = v;
+                let vatRate = 21; // Por defecto siempre 21
+
+                // Si viene un default válido (incluyendo el número 0 o string "0")
+                if (defaults?.vat !== undefined && defaults?.vat !== null && String(defaults.vat).trim() !== '') {
+                    const defV = Number(defaults.vat);
+                    if (!isNaN(defV)) vatRate = defV;
                 }
+
+                // 2. Revisar si el Excel tiene un dato específico para esta fila
+                if (rawVat !== null && rawVat !== undefined) {
+                    // Convertimos a string para verificar que no esté vacío (ej: celdas vacías)
+                    const strVat = String(rawVat).trim();
+
+                    if (strVat !== '') {
+                        const v = cleanPrice(rawVat);
+                        // Filtro: Solo aplicamos si es un número válido entre 0 y 100
+                        // (Esto permite el 0 explícito)
+                        if (!isNaN(v) && v >= 0 && v <= 100) {
+                            vatRate = v;
+                        }
+                    }
+                }
+
+                // Debug temporal: Descomentar si sigue fallando para ver qué lee
+                // console.log(`Fila ${i}: RawVat="${rawVat}" -> VatFinal=${vatRate}`);
 
                 let currency = 'ARS';
                 if (rawCurr) {
