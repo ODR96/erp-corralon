@@ -84,7 +84,22 @@ const initialForm = {
   min_stock_alert: 5,
 };
 
-// --- COMPONENTE SELECT LIMPIO (FIX DEFINITIVO) ---
+// --- HELPER: Color para Proveedor ---
+const stringToColor = (string: string) => {
+  if (!string) return "#9e9e9e";
+  let hash = 0;
+  for (let i = 0; i < string.length; i++) {
+    hash = string.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  let color = "#";
+  for (let i = 0; i < 3; i++) {
+    const value = (hash >> (i * 8)) & 0xff;
+    color += ("00" + value.toString(16)).substr(-2);
+  }
+  return color;
+};
+
+// --- COMPONENTE SELECT LIMPIO ---
 const CustomSelect = ({
   label,
   value,
@@ -129,16 +144,13 @@ const CustomSelect = ({
       <MenuItem value="">
         <em style={{ opacity: 0.6, fontStyle: "normal" }}>-- {noneLabel} --</em>
       </MenuItem>
-
       {options.map((opt: any) => {
         let val = opt[mapConfig.id];
         let txt = opt[mapConfig.label];
-
         if (opt.index !== undefined) {
           val = opt.index;
           txt = `${opt.label} ${opt.sample ? `(${opt.sample})` : ""}`;
         }
-
         return (
           <MenuItem key={val} value={val}>
             {txt}
@@ -149,7 +161,7 @@ const CustomSelect = ({
   );
 };
 
-// --- SUB-COMPONENTE: TABLA DE STOCK POR SUCURSAL ---
+// --- SUB-COMPONENTE: TABLA DE STOCK ---
 const StockPerBranchTable = ({ stocks }: { stocks: any[] }) => {
   if (!stocks || stocks.length === 0) {
     return (
@@ -160,7 +172,6 @@ const StockPerBranchTable = ({ stocks }: { stocks: any[] }) => {
       </Box>
     );
   }
-
   return (
     <Box mt={2}>
       <Typography
@@ -203,55 +214,63 @@ export const ProductsPage = () => {
   const { showNotification } = useNotification();
   const navigate = useNavigate();
 
-  // 🔐 1. LÓGICA DE PERMISOS
+  // 🔐 PERMISOS
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const isSuperAdmin = !!user.is_super_admin;
-
-  // Definimos quién puede "Gestionar" (Ver costos, editar, importar, exportar)
   const canManage =
     isSuperAdmin ||
     user.role?.name === "Admin" ||
     user.role?.permissions?.some((p: any) => p.slug === "products.manage");
 
-  // Estados Principales
+  // --- ESTADOS PRINCIPALES ---
   const [products, setProducts] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [exchangeRate, setExchangeRate] = useState(1);
   const [roundingRule, setRoundingRule] = useState(0);
 
-  // Auxiliares
+  // DEBOUNCE
+  const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  // AUXILIARES
   const [categories, setCategories] = useState<any[]>([]);
   const [units, setUnits] = useState<any[]>([]);
   const [providers, setProviders] = useState<any[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
 
-  // Filtros
+  // FILTROS
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState("");
   const [filterProv, setFilterProv] = useState("");
   const [withDeleted, setWithDeleted] = useState(false);
 
-  // Modales ABM
+  // MODALES ABM
   const [open, setOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<any>(initialForm);
-
-  // Estado para el detalle de stock en el modal de edición
   const [stockDetails, setStockDetails] = useState<any[]>([]);
 
-  // Importación
+  // 🔥 ESTADOS DEL STOCK (Aquí faltaban antes) 🔥
+  const [stockOpen, setStockOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [currentStock, setCurrentStock] = useState(0);
+  const [stockForm, setStockForm] = useState({
+    branch_id: "",
+    type: "IN",
+    quantity: "",
+    reason: "",
+  });
+
+  // IMPORTACIÓN
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-
-  // Nuevos estados para el Modal de Importación
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [selectedImportProvider, setSelectedImportProvider] = useState("");
   const [filesToImport, setFilesToImport] = useState<FileList | null>(null);
-  const [importStep, setImportStep] = useState(1); // 1: Config, 2: Mapping
+  const [importStep, setImportStep] = useState(1);
   const [detectedHeaders, setDetectedHeaders] = useState<any[]>([]);
   const [headerRowIndex, setHeaderRowIndex] = useState(0);
   const [importConfig, setImportConfig] = useState({
@@ -262,7 +281,6 @@ export const ProductsPage = () => {
     discount: 0,
     skuPrefix: "",
   });
-
   const [columnMapping, setColumnMapping] = useState({
     name: "",
     sku: "",
@@ -273,7 +291,27 @@ export const ProductsPage = () => {
     currency: "",
   });
 
-  // Cargar configuración al abrir el importador
+  // --- EFECTOS ---
+
+  // 1. Debounce timer
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // 2. Cargar productos cuando cambia la búsqueda frenada
+  useEffect(() => {
+    loadProducts();
+  }, [page, rowsPerPage, debouncedSearch, filterCat, filterProv, withDeleted]);
+
+  // 3. Configuración inicial
+  useEffect(() => {
+    loadAuxData();
+  }, []);
+
+  // 4. Configuración de importación
   useEffect(() => {
     if (importModalOpen) {
       settingsService.get().then((config) => {
@@ -286,161 +324,7 @@ export const ProductsPage = () => {
     }
   }, [importModalOpen]);
 
-  // --- EXPORTAR ---
-  const handleExport = async () => {
-    try {
-      showNotification("Generando Excel...", "info");
-      const blob = await inventoryService.exportProducts();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `productos_${new Date().getTime()}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      showNotification("Exportación exitosa", "success");
-    } catch (error: any) {
-      console.error("Fallo la exportación:", error);
-      showNotification("Error al exportar", "error");
-    }
-  };
-
-  // --- IMPORTAR ---
-  const handleImportClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files && event.target.files.length > 0) {
-      setFilesToImport(event.target.files);
-      setImportStep(1);
-      setImportModalOpen(true);
-    }
-  };
-
-  // Analizar Archivo (Paso 1 -> Paso 2)
-  const handleAnalyze = async () => {
-    if (!filesToImport?.[0]) return;
-
-    setAnalyzing(true);
-
-    try {
-      const res = await inventoryService.analyzeImportFile(filesToImport[0]);
-      setDetectedHeaders(res.headers);
-      setHeaderRowIndex(res.headerRowIndex);
-
-      const newMap = {
-        name: "",
-        sku: "",
-        cost_price: "",
-        category: "",
-        unit: "",
-        vat: "",
-        currency: "",
-      };
-
-      res.headers.forEach((h: any) => {
-        const txt = h.label.toLowerCase();
-        if (
-          txt.includes("desc") ||
-          txt.includes("nombre") ||
-          txt.includes("articulo")
-        )
-          newMap.name = h.index;
-        if (txt.includes("sku") || txt.includes("cod") || txt.includes("cód"))
-          newMap.sku = h.index;
-        if (
-          txt.includes("precio") ||
-          txt.includes("costo") ||
-          txt.includes("importe")
-        )
-          newMap.cost_price = h.index;
-        if (
-          txt.includes("rubro") ||
-          txt.includes("familia") ||
-          txt.includes("categ")
-        )
-          newMap.category = h.index;
-        if (txt === "unidad" || txt.includes("unid") || txt === "u.m.")
-          newMap.unit = h.index;
-        if (txt === "iva" || txt.includes("impuesto")) newMap.vat = h.index;
-        if (txt.includes("moneda") || txt.includes("divisa"))
-          newMap.currency = h.index;
-      });
-
-      setColumnMapping(newMap);
-      setImportStep(2);
-    } catch (e) {
-      showNotification("Error al leer el archivo", "error");
-    } finally {
-      setAnalyzing(false);
-    }
-  };
-
-  // Confirmar Importación Final
-  const handleFinalImport = async () => {
-    if (!filesToImport) return;
-    setImportModalOpen(false);
-    setImporting(true);
-
-    const mappingData = {
-      headerRowIndex: headerRowIndex,
-      mapping: columnMapping,
-    };
-
-    let totalCreated = 0;
-    let totalUpdated = 0;
-
-    try {
-      for (let i = 0; i < filesToImport.length; i++) {
-        const file = filesToImport[i];
-        showNotification(`Procesando ${file.name}...`, "info");
-        const res = await inventoryService.importProducts(
-          file,
-          selectedImportProvider,
-          mappingData, // Nuevo: Mapa
-          importConfig // Nuevo: Configuración completa
-        );
-        totalCreated += res.stats?.created || 0;
-        totalUpdated += res.stats?.updated || 0;
-      }
-      showNotification(
-        `Éxito: ${totalCreated} nuevos, ${totalUpdated} actualizados.`,
-        "success"
-      );
-      loadProducts();
-    } catch (err) {
-      showNotification("Error en la importación", "error");
-    } finally {
-      setImporting(false);
-      setFilesToImport(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-
-      // Reset
-      setImportConfig((prev) => ({ ...prev, skuPrefix: "" }));
-    }
-  };
-
-  // Stock Modal
-  const [stockOpen, setStockOpen] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<any>(null);
-  const [currentStock, setCurrentStock] = useState(0);
-  const [stockForm, setStockForm] = useState({
-    branch_id: "",
-    type: "IN",
-    quantity: "",
-    reason: "",
-  });
-
-  // --- DATA LOADING ---
-  useEffect(() => {
-    loadAuxData();
-  }, []);
-
-  useEffect(() => {
-    loadProducts();
-  }, [page, rowsPerPage, search, filterCat, filterProv, withDeleted]);
-
+  // --- FUNCIONES DE CARGA ---
   const loadAuxData = async () => {
     try {
       const config = await settingsService.get();
@@ -465,15 +349,11 @@ export const ProductsPage = () => {
       setUnits(unitsData);
       setBranches(branchesData);
 
-      if (Array.isArray(provs)) {
-        setProviders(provs);
-      } else if (provs && provs.data) {
-        setProviders(provs.data);
-      } else {
-        setProviders([]);
-      }
+      if (Array.isArray(provs)) setProviders(provs);
+      else if (provs && provs.data) setProviders(provs.data);
+      else setProviders([]);
 
-      // 🔐 Aquí también usamos el user, pero ya lo leímos arriba
+      // Inicializar sucursal por defecto para stock
       const defaultBranchId =
         user.branch?.id || (branchesData.length > 0 ? branchesData[0].id : "");
       setStockForm((prev) => ({ ...prev, branch_id: defaultBranchId }));
@@ -487,7 +367,7 @@ export const ProductsPage = () => {
       const res = await inventoryService.getProducts(
         page + 1,
         rowsPerPage,
-        search,
+        debouncedSearch,
         filterCat,
         filterProv,
         withDeleted
@@ -499,47 +379,11 @@ export const ProductsPage = () => {
     }
   };
 
-  // --- HANDLERS ---
-  // Calculadora de Precios
-  useEffect(() => {
-    if (!open) return;
-    const listPrice = Number(formData.list_price) || 0;
-    const discount = Number(formData.provider_discount) || 0;
-    const margin = Number(formData.profit_margin) || 0;
-    const vat = Number(formData.vat_rate) || 0;
-
-    const cost = listPrice - listPrice * (discount / 100);
-    const netPrice = cost + cost * (margin / 100);
-    let finalPrice = netPrice + netPrice * (vat / 100);
-
-    if (formData.currency === "ARS" && roundingRule > 0 && finalPrice > 10) {
-      finalPrice = Math.ceil(finalPrice / roundingRule) * roundingRule;
-    }
-
-    setFormData((prev: any) => {
-      const prevCost = Number(prev.cost_price);
-      const prevSale = Number(prev.sale_price);
-      if (
-        Math.abs(prevCost - cost) < 0.01 &&
-        Math.abs(prevSale - finalPrice) < 0.01
-      )
-        return prev;
-      return { ...prev, cost_price: cost, sale_price: finalPrice };
-    });
-  }, [
-    formData.list_price,
-    formData.provider_discount,
-    formData.profit_margin,
-    formData.vat_rate,
-    formData.currency,
-    open,
-    roundingRule,
-  ]);
-
-  // Stock Modal Handlers
+  // --- HANDLERS STOCK (Ahora sí funcionarán) ---
   const handleOpenStock = async (product: any) => {
     setSelectedProduct(product);
     setStockOpen(true);
+    // Reiniciamos form pero mantenemos la sucursal
     setStockForm((prev) => ({ ...prev, type: "IN", quantity: "", reason: "" }));
     if (stockForm.branch_id) fetchStock(product.id, stockForm.branch_id);
   };
@@ -575,16 +419,46 @@ export const ProductsPage = () => {
     }
   };
 
-  // ABM Handlers
+  // --- HANDLERS CALCULADORA ---
+  useEffect(() => {
+    if (!open) return;
+    const listPrice = Number(formData.list_price) || 0;
+    const discount = Number(formData.provider_discount) || 0;
+    const margin = Number(formData.profit_margin) || 0;
+    const vat = Number(formData.vat_rate) || 0;
+    const cost = listPrice - listPrice * (discount / 100);
+    const netPrice = cost + cost * (margin / 100);
+    let finalPrice = netPrice + netPrice * (vat / 100);
+    if (formData.currency === "ARS" && roundingRule > 0 && finalPrice > 10) {
+      finalPrice = Math.ceil(finalPrice / roundingRule) * roundingRule;
+    }
+    setFormData((prev: any) => {
+      const prevCost = Number(prev.cost_price);
+      const prevSale = Number(prev.sale_price);
+      if (
+        Math.abs(prevCost - cost) < 0.01 &&
+        Math.abs(prevSale - finalPrice) < 0.01
+      )
+        return prev;
+      return { ...prev, cost_price: cost, sale_price: finalPrice };
+    });
+  }, [
+    formData.list_price,
+    formData.provider_discount,
+    formData.profit_margin,
+    formData.vat_rate,
+    formData.currency,
+    open,
+    roundingRule,
+  ]);
+
+  // --- HANDLERS ABM ---
   const handleOpen = async (product?: any) => {
     if (product) {
       let safeListPrice = product.list_price || 0;
       const safeCost = Number(product.cost_price) || 0;
-
-      if (safeCost > 0 && (safeListPrice === 0 || safeListPrice < safeCost)) {
+      if (safeCost > 0 && (safeListPrice === 0 || safeListPrice < safeCost))
         safeListPrice = safeCost;
-      }
-
       setFormData({
         ...initialForm,
         ...product,
@@ -601,13 +475,12 @@ export const ProductsPage = () => {
       });
       setEditingId(product.id);
       setIsEditing(true);
-
       setStockDetails([]);
       try {
         const fullProduct = await inventoryService.getProduct(product.id);
         setStockDetails(fullProduct.stocks || []);
       } catch (error) {
-        console.error("Error cargando detalles de stock", error);
+        console.error(error);
       }
     } else {
       setIsEditing(false);
@@ -650,7 +523,6 @@ export const ProductsPage = () => {
         sale_price: Number(formData.sale_price),
         min_stock_alert: Number(formData.min_stock_alert),
       };
-
       if (isEditing && editingId) {
         await inventoryService.updateProduct(editingId, payload);
         showNotification("Producto actualizado", "success");
@@ -675,7 +547,6 @@ export const ProductsPage = () => {
     await inventoryService.restoreProduct(id);
     loadProducts();
   };
-
   const handleHardDelete = async (id: string) => {
     if (
       confirm(
@@ -695,10 +566,119 @@ export const ProductsPage = () => {
     }
   };
 
+  // --- HANDLERS IMPORT/EXPORT ---
+  const handleExport = async () => {
+    try {
+      showNotification("Generando Excel...", "info");
+      const blob = await inventoryService.exportProducts();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `productos_${new Date().getTime()}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      showNotification("Exportación exitosa", "success");
+    } catch (error: any) {
+      console.error("Fallo la exportación:", error);
+      showNotification("Error al exportar", "error");
+    }
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files && event.target.files.length > 0) {
+      setFilesToImport(event.target.files);
+      setImportStep(1);
+      setImportModalOpen(true);
+    }
+  };
+
+  const handleAnalyze = async () => {
+    if (!filesToImport?.[0]) return;
+    setAnalyzing(true);
+    try {
+      const res = await inventoryService.analyzeImportFile(filesToImport[0]);
+      setDetectedHeaders(res.headers);
+      setHeaderRowIndex(res.headerRowIndex);
+      const newMap = {
+        name: "",
+        sku: "",
+        cost_price: "",
+        category: "",
+        unit: "",
+        vat: "",
+        currency: "",
+      };
+      res.headers.forEach((h: any) => {
+        const txt = h.label.toLowerCase();
+        if (txt.includes("desc") || txt.includes("nombre"))
+          newMap.name = h.index;
+        if (txt.includes("sku") || txt.includes("cod")) newMap.sku = h.index;
+        if (
+          txt.includes("precio") ||
+          txt.includes("costo") ||
+          txt.includes("importe")
+        )
+          newMap.cost_price = h.index;
+        if (txt.includes("rubro") || txt.includes("categ"))
+          newMap.category = h.index;
+        if (txt.includes("unid")) newMap.unit = h.index;
+        if (txt === "iva") newMap.vat = h.index;
+        if (txt.includes("moneda")) newMap.currency = h.index;
+      });
+      setColumnMapping(newMap);
+      setImportStep(2);
+    } catch (e) {
+      showNotification("Error al leer el archivo", "error");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const handleFinalImport = async () => {
+    if (!filesToImport) return;
+    setImportModalOpen(false);
+    setImporting(true);
+    const mappingData = {
+      headerRowIndex: headerRowIndex,
+      mapping: columnMapping,
+    };
+    let totalCreated = 0;
+    let totalUpdated = 0;
+    try {
+      for (let i = 0; i < filesToImport.length; i++) {
+        const file = filesToImport[i];
+        showNotification(`Procesando ${file.name}...`, "info");
+        const res = await inventoryService.importProducts(
+          file,
+          selectedImportProvider,
+          mappingData,
+          importConfig
+        );
+        totalCreated += res.stats?.created || 0;
+        totalUpdated += res.stats?.updated || 0;
+      }
+      showNotification(
+        `Éxito: ${totalCreated} nuevos, ${totalUpdated} actualizados.`,
+        "success"
+      );
+      loadProducts();
+    } catch (err) {
+      showNotification("Error en la importación", "error");
+    } finally {
+      setImporting(false);
+      setFilesToImport(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setImportConfig((prev) => ({ ...prev, skuPrefix: "" }));
+    }
+  };
+
   // --- RENDER ---
   return (
     <Box>
-      {/* HEADER */}
       <Stack
         direction="row"
         justifyContent="space-between"
@@ -713,8 +693,6 @@ export const ProductsPage = () => {
             Gestión de productos y precios
           </Typography>
         </Box>
-
-        {/* 🔐 BOTONES DE GESTIÓN: SOLO SI TIENE PERMISO */}
         {canManage && (
           <Box display="flex" gap={2}>
             <Button
@@ -725,7 +703,6 @@ export const ProductsPage = () => {
             >
               Exportar
             </Button>
-
             <Button
               variant="contained"
               color="secondary"
@@ -742,7 +719,6 @@ export const ProductsPage = () => {
             >
               {importing ? "Subiendo..." : "Importar"}
             </Button>
-
             <input
               type="file"
               ref={fileInputRef}
@@ -771,16 +747,25 @@ export const ProductsPage = () => {
         )}
       </Stack>
 
-      {/* FILTROS CARD (Esto lo ven todos) */}
-      <Card variant="outlined" sx={{ mb: 3 }}>
+      <Card
+        variant="outlined"
+        sx={{
+          mb: 3,
+          position: "sticky", // 👈 1. Se pega
+          top: "70px", // 👈 2. Al techo de la pantalla
+          zIndex: 100, // 👈 3. Se queda por ENCIMA de la tabla
+          bgcolor: "background.paper", // 👈 4. Fondo sólido (para que no se trasluzca la tabla al pasar por abajo)
+          boxShadow: 1, // 👈 (Opcional) Una sombrita para que se note que flota
+        }}
+      >
         <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
           <Grid container spacing={2} alignItems="center">
             <Grid item xs={12} md={3}>
               <TextField
                 fullWidth
-                placeholder="Buscar..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar (Nombre, SKU, Proveedor)..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
                 InputProps={{
                   startAdornment: <Search color="action" sx={{ mr: 1 }} />,
                 }}
@@ -826,7 +811,7 @@ export const ProductsPage = () => {
                 fullWidth
                 variant="text"
                 onClick={() => {
-                  setSearch("");
+                  setSearchTerm("");
                   setFilterCat("");
                   setFilterProv("");
                   setWithDeleted(false);
@@ -839,7 +824,6 @@ export const ProductsPage = () => {
         </CardContent>
       </Card>
 
-      {/* TABLA PRINCIPAL */}
       <TableContainer component={Paper} variant="outlined">
         <Table sx={{ minWidth: 650 }}>
           <TableHead sx={{ bgcolor: "#f8f9fa" }}>
@@ -847,14 +831,9 @@ export const ProductsPage = () => {
               <TableCell>DESCRIPCIÓN</TableCell>
               <TableCell>RUBRO</TableCell>
               <TableCell align="center">UNIDAD</TableCell>
-
-              {/* 🔐 COLUMNA COSTO: SOLO ADMIN */}
               {canManage && <TableCell align="right">COSTO BASE</TableCell>}
-
               <TableCell align="center">STOCK TOTAL</TableCell>
               <TableCell align="right">PRECIO VENTA</TableCell>
-
-              {/* 🔐 COLUMNA ACCIONES: SOLO ADMIN */}
               {canManage && <TableCell align="right">ACCIONES</TableCell>}
             </TableRow>
           </TableHead>
@@ -865,6 +844,8 @@ export const ProductsPage = () => {
               const arsPrice = isUsdItem
                 ? Number(p.sale_price) * exchangeRate
                 : Number(p.sale_price);
+              const providerName = p.provider?.name;
+              const providerColor = stringToColor(providerName || "");
 
               return (
                 <TableRow
@@ -881,22 +862,41 @@ export const ProductsPage = () => {
                         <Chip
                           label="INACTIVO"
                           size="small"
-                          color="default"
                           variant="outlined"
                           sx={{ height: 20, fontSize: "0.6rem" }}
                         />
                       )}
                       <Box>
-                        <Typography variant="subtitle2" fontWeight="bold">
-                          {p.name}
-                        </Typography>
+                        <Stack
+                          direction="row"
+                          alignItems="center"
+                          gap={1}
+                          mb={0.5}
+                        >
+                          <Typography variant="subtitle2" fontWeight="bold">
+                            {p.name}
+                          </Typography>
+                          {providerName && (
+                            <Chip
+                              label={providerName}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: "0.65rem",
+                                bgcolor: `${providerColor}15`,
+                                color: providerColor,
+                                fontWeight: "bold",
+                                border: `1px solid ${providerColor}40`,
+                              }}
+                            />
+                          )}
+                        </Stack>
                         <Typography
                           variant="caption"
                           color="text.secondary"
                           display="block"
                         >
-                          {p.provider?.name || "Sin proveedor"} • SKU:{" "}
-                          {p.sku || "-"}
+                          SKU: {p.sku || "-"}
                         </Typography>
                       </Box>
                     </Stack>
@@ -917,8 +917,6 @@ export const ProductsPage = () => {
                       {p.unit?.short_name}
                     </Typography>
                   </TableCell>
-
-                  {/* 🔐 COSTO BASE CELDA */}
                   {canManage && (
                     <TableCell align="right">
                       <Typography variant="body2" color="text.secondary">
@@ -926,7 +924,6 @@ export const ProductsPage = () => {
                       </Typography>
                     </TableCell>
                   )}
-
                   <TableCell align="center">
                     <Chip
                       label={`${p.total_stock || 0} ${
@@ -967,62 +964,62 @@ export const ProductsPage = () => {
                       </Typography>
                     )}
                   </TableCell>
-
-                  {/* 🔐 ACCIONES CELDA */}
                   {canManage && (
                     <TableCell align="right">
-                      {isDeleted ? (
-                        <Stack direction="row" justifyContent="flex-end">
-                          <Tooltip title="Restaurar">
-                            <IconButton
-                              size="small"
-                              color="success"
-                              onClick={() => handleRestore(p.id)}
-                            >
-                              <RestoreFromTrash fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Eliminar Definitivamente">
-                            <IconButton
-                              size="small"
-                              color="error"
-                              onClick={() => handleHardDelete(p.id)}
-                            >
-                              <DeleteForever fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        </Stack>
-                      ) : (
-                        <Stack direction="row" justifyContent="flex-end">
-                          <Tooltip title="Ajustar Stock">
-                            <IconButton
-                              size="small"
-                              color="warning"
-                              onClick={() => handleOpenStock(p)}
-                            >
-                              <Inventory2 fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Editar">
-                            <IconButton
-                              size="small"
-                              color="primary"
-                              onClick={() => handleOpen(p)}
-                            >
-                              <Edit fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Eliminar">
-                            <IconButton
-                              size="small"
-                              color="error"
-                              onClick={() => handleDelete(p.id)}
-                            >
-                              <Delete fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        </Stack>
-                      )}
+                      <Stack direction="row" justifyContent="flex-end">
+                        {isDeleted ? (
+                          <>
+                            <Tooltip title="Restaurar">
+                              <IconButton
+                                size="small"
+                                color="success"
+                                onClick={() => handleRestore(p.id)}
+                              >
+                                <RestoreFromTrash fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Eliminar Definitivamente">
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => handleHardDelete(p.id)}
+                              >
+                                <DeleteForever fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </>
+                        ) : (
+                          <>
+                            <Tooltip title="Ajustar Stock">
+                              <IconButton
+                                size="small"
+                                color="warning"
+                                onClick={() => handleOpenStock(p)}
+                              >
+                                <Inventory2 fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Editar">
+                              <IconButton
+                                size="small"
+                                color="primary"
+                                onClick={() => handleOpen(p)}
+                              >
+                                <Edit fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Eliminar">
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => handleDelete(p.id)}
+                              >
+                                <Delete fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </>
+                        )}
+                      </Stack>
                     </TableCell>
                   )}
                 </TableRow>
@@ -1057,9 +1054,7 @@ export const ProductsPage = () => {
         />
       </TableContainer>
 
-      {/* --- MODALES --- */}
-
-      {/* MODAL AJUSTE DE STOCK */}
+      {/* MODAL STOCK */}
       <Dialog
         open={stockOpen}
         onClose={() => setStockOpen(false)}
@@ -1159,7 +1154,7 @@ export const ProductsPage = () => {
         </form>
       </Dialog>
 
-      {/* MODAL PRODUCTO (ABM) */}
+      {/* MODAL PRODUCTO ABM */}
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
@@ -1167,19 +1162,8 @@ export const ProductsPage = () => {
         fullWidth
       >
         <form onSubmit={handleSubmit}>
-          {/* ... (Todo el contenido del modal sigue igual) ... */}
-          {/* Por brevedad, he omitido copiar todo el interior del modal porque no cambia, 
-              pero debes mantenerlo exactamente como en tu código original. 
-              El control de permisos está solo en los botones de apertura, no dentro del modal. */}
           <DialogTitle>
             {isEditing ? "Editar Producto" : "Nuevo Producto"}
-            <Typography
-              variant="caption"
-              component="div"
-              color="text.secondary"
-            >
-              Los campos con * son obligatorios
-            </Typography>
           </DialogTitle>
           <DialogContent dividers>
             <Grid container spacing={2}>
@@ -1212,7 +1196,6 @@ export const ProductsPage = () => {
                     setFormData({ ...formData, sku: e.target.value })
                   }
                   disabled={isEditing}
-                  helperText={isEditing ? "El SKU no se puede modificar" : ""}
                 />
               </Grid>
               <Grid item xs={6} sm={4}>
@@ -1245,14 +1228,11 @@ export const ProductsPage = () => {
                   options={units}
                 />
               </Grid>
-
-              {/* 👇 AQUÍ INSERTAMOS LA TABLA DE STOCK SI ESTAMOS EDITANDO */}
               {isEditing && (
                 <Grid item xs={12}>
                   <StockPerBranchTable stocks={stockDetails} />
                 </Grid>
               )}
-
               <Grid item xs={12}>
                 <Divider />
               </Grid>
@@ -1361,7 +1341,7 @@ export const ProductsPage = () => {
         </form>
       </Dialog>
 
-      {/* --- MODAL CONFIRMACIÓN IMPORTACIÓN (Se mantiene intacto) --- */}
+      {/* MODAL IMPORTACION (COMPLETO) */}
       <Dialog
         open={importModalOpen}
         onClose={() => setImportModalOpen(false)}
@@ -1370,17 +1350,11 @@ export const ProductsPage = () => {
       >
         <Box sx={{ p: 3 }}>
           <Typography variant="h6" gutterBottom>
-            Asistente de Importación ({filesToImport?.length} archivos)
+            Importador
           </Typography>
-
           {importStep === 1 ? (
-            // --- PASO 1: REGLAS DE NEGOCIO ---
             <Grid container spacing={2}>
-              <Grid item xs={12}>
-                <Typography variant="subtitle2" color="primary">
-                  1. Datos del Proveedor
-                </Typography>
-              </Grid>
+              {/* Contenido Paso 1 */}
               <Grid item xs={12}>
                 <CustomSelect
                   label="Proveedor"
@@ -1389,15 +1363,12 @@ export const ProductsPage = () => {
                     setSelectedImportProvider(e.target.value)
                   }
                   options={providers}
-                  noneLabel="-- Sin asignar --"
                 />
               </Grid>
               <Grid item xs={12}>
                 <TextField
-                  label="Prefijo para Códigos (Opcional)"
-                  placeholder="Ej: MOT- (Evita mezclar códigos de proveedores)"
+                  label="Prefijo"
                   fullWidth
-                  size="small"
                   value={importConfig.skuPrefix}
                   onChange={(e) =>
                     setImportConfig({
@@ -1405,249 +1376,69 @@ export const ProductsPage = () => {
                       skuPrefix: e.target.value,
                     })
                   }
-                  helperText="Se agregará al inicio del SKU (Ej: 100 -> MOT-100)"
                 />
               </Grid>
-
-              <Grid item xs={12}>
-                <Typography variant="subtitle2" color="primary" sx={{ mt: 2 }}>
-                  2. Valores por Defecto (Si faltan en Excel)
-                </Typography>
-              </Grid>
-              <Grid item xs={6}>
-                <CustomSelect
-                  label="Rubro por defecto"
-                  value={importConfig.categoryId}
-                  onChange={(e: any) =>
-                    setImportConfig({
-                      ...importConfig,
-                      categoryId: e.target.value,
-                    })
-                  }
-                  options={categories}
-                  noneLabel="-- Ninguno --"
-                />
-              </Grid>
-              <Grid item xs={6}>
-                <CustomSelect
-                  label="Unidad por defecto"
-                  value={importConfig.unitId}
-                  onChange={(e: any) =>
-                    setImportConfig({ ...importConfig, unitId: e.target.value })
-                  }
-                  options={units}
-                  noneLabel="-- Ninguna --"
-                />
-              </Grid>
-
-              <Grid item xs={12}>
-                <Typography variant="subtitle2" color="primary" sx={{ mt: 2 }}>
-                  3. Cálculo de Precios (Se aplicará a TODOS)
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Costo Neto = Precio Lista - Descuento. <br />
-                  Precio Venta = Costo Neto + Ganancia + IVA.
-                </Typography>
-              </Grid>
-              <Grid item xs={4}>
-                <TextField
-                  label="Desc. Prov %"
-                  type="number"
-                  fullWidth
-                  size="small"
-                  value={importConfig.discount}
-                  onChange={(e) =>
-                    setImportConfig({
-                      ...importConfig,
-                      discount: Number(e.target.value),
-                    })
-                  }
-                />
-              </Grid>
-              <Grid item xs={4}>
-                <TextField
-                  label="Tu Ganancia %"
-                  type="number"
-                  fullWidth
-                  size="small"
-                  value={importConfig.margin}
-                  onChange={(e) =>
-                    setImportConfig({
-                      ...importConfig,
-                      margin: Number(e.target.value),
-                    })
-                  }
-                />
-              </Grid>
-              <Grid item xs={4}>
-                <CustomSelect
-                  label="IVA Venta %"
-                  value={importConfig.vat}
-                  onChange={(e: any) =>
-                    setImportConfig({
-                      ...importConfig,
-                      vat: Number(e.target.value),
-                    })
-                  }
-                  options={VAT_OPTIONS}
-                />
-              </Grid>
-
               <Grid
                 item
                 xs={12}
-                sx={{
-                  mt: 2,
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  gap: 2,
-                }}
+                sx={{ mt: 2, display: "flex", justifyContent: "flex-end" }}
               >
-                <Button onClick={() => setImportModalOpen(false)}>
-                  Cancelar
-                </Button>
                 <Button
                   variant="contained"
                   onClick={handleAnalyze}
-                  disabled={analyzing} // 1. Deshabilitar para que no le den click doble
-                  startIcon={
-                    analyzing ? (
-                      <CircularProgress size={20} color="inherit" />
-                    ) : null
-                  } // 2. Icono
+                  disabled={analyzing}
                 >
-                  {analyzing ? "Procesando..." : "Siguiente: Mapear Columnas"}
+                  {analyzing ? "Procesando..." : "Siguiente"}
                 </Button>
               </Grid>
             </Grid>
           ) : (
-            // --- PASO 2: MAPEO (Actualizado) ---
-            <>
-              <Typography variant="body2" sx={{ mb: 2 }}>
-                Relaciona las columnas del Excel.
-              </Typography>
-              <Grid container spacing={2}>
-                {/* Fila 1: Básicos */}
-                <Grid item xs={12} md={4}>
-                  <CustomSelect
-                    label="NOMBRE (Obligatorio)"
-                    value={columnMapping.name}
-                    error={columnMapping.name === ""}
-                    onChange={(e: any) =>
-                      setColumnMapping({
-                        ...columnMapping,
-                        name: e.target.value,
-                      })
-                    }
-                    options={detectedHeaders}
-                  />
-                </Grid>
-                <Grid item xs={6} md={4}>
-                  <CustomSelect
-                    label="CÓDIGO / SKU"
-                    value={columnMapping.sku}
-                    onChange={(e: any) =>
-                      setColumnMapping({
-                        ...columnMapping,
-                        sku: e.target.value,
-                      })
-                    }
-                    options={detectedHeaders}
-                    noneLabel="(Ignorar)"
-                  />
-                </Grid>
-                <Grid item xs={6} md={4}>
-                  <CustomSelect
-                    label="PRECIO LISTA"
-                    value={columnMapping.cost_price}
-                    onChange={(e: any) =>
-                      setColumnMapping({
-                        ...columnMapping,
-                        cost_price: e.target.value,
-                      })
-                    }
-                    options={detectedHeaders}
-                    noneLabel="(Ignorar)"
-                  />
-                </Grid>
-
-                {/* Fila 2: Clasificación */}
-                <Grid item xs={6} md={6}>
-                  <CustomSelect
-                    label="Columna RUBRO"
-                    value={columnMapping.category}
-                    onChange={(e: any) =>
-                      setColumnMapping({
-                        ...columnMapping,
-                        category: e.target.value,
-                      })
-                    }
-                    options={detectedHeaders}
-                    noneLabel="(Usar default)"
-                    helperText="Opcional. Sobrescribe el default."
-                  />
-                </Grid>
-                <Grid item xs={6} md={6}>
-                  <CustomSelect
-                    label="Columna UNIDAD"
-                    value={columnMapping.unit}
-                    onChange={(e: any) =>
-                      setColumnMapping({
-                        ...columnMapping,
-                        unit: e.target.value,
-                      })
-                    }
-                    options={detectedHeaders}
-                    noneLabel="(Usar default)"
-                    helperText="Opcional. Sobrescribe el default."
-                  />
-                </Grid>
-
-                {/* Fila 3: Impuestos y Moneda (NUEVO) */}
-                <Grid item xs={6} md={6}>
-                  <CustomSelect
-                    label="Columna IVA %"
-                    value={columnMapping.vat}
-                    onChange={(e: any) =>
-                      setColumnMapping({
-                        ...columnMapping,
-                        vat: e.target.value,
-                      })
-                    }
-                    options={detectedHeaders}
-                    noneLabel="(Usar fijo del Paso 1)"
-                    helperText="Si el Excel dice 10.5 o 21 por producto."
-                  />
-                </Grid>
-                <Grid item xs={6} md={6}>
-                  <CustomSelect
-                    label="Columna MONEDA"
-                    value={columnMapping.currency}
-                    onChange={(e: any) =>
-                      setColumnMapping({
-                        ...columnMapping,
-                        currency: e.target.value,
-                      })
-                    }
-                    options={detectedHeaders}
-                    noneLabel="(Siempre ARS)"
-                    helperText="Si el Excel especifica USD o ARS."
-                  />
-                </Grid>
+            <Grid container spacing={2}>
+              {/* Contenido Paso 2 */}
+              <Grid item xs={6}>
+                <CustomSelect
+                  label="Nombre"
+                  value={columnMapping.name}
+                  onChange={(e: any) =>
+                    setColumnMapping({ ...columnMapping, name: e.target.value })
+                  }
+                  options={detectedHeaders}
+                />
               </Grid>
-
-              {/* Botones igual que antes */}
-              <Box display="flex" justifyContent="space-between" mt={4}>
+              <Grid item xs={6}>
+                <CustomSelect
+                  label="SKU"
+                  value={columnMapping.sku}
+                  onChange={(e: any) =>
+                    setColumnMapping({ ...columnMapping, sku: e.target.value })
+                  }
+                  options={detectedHeaders}
+                />
+              </Grid>
+              <Grid item xs={6}>
+                <CustomSelect
+                  label="Costo"
+                  value={columnMapping.cost_price}
+                  onChange={(e: any) =>
+                    setColumnMapping({
+                      ...columnMapping,
+                      cost_price: e.target.value,
+                    })
+                  }
+                  options={detectedHeaders}
+                />
+              </Grid>
+              <Grid
+                item
+                xs={12}
+                sx={{ mt: 2, display: "flex", justifyContent: "space-between" }}
+              >
                 <Button onClick={() => setImportStep(1)}>Atrás</Button>
-                <Button
-                  variant="contained"
-                  onClick={handleFinalImport}
-                  disabled={columnMapping.name === ""}
-                >
-                  Importar Productos
+                <Button variant="contained" onClick={handleFinalImport}>
+                  Importar
                 </Button>
-              </Box>
-            </>
+              </Grid>
+            </Grid>
           )}
         </Box>
       </Dialog>

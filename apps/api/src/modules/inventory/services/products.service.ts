@@ -38,7 +38,7 @@ export class ProductsService {
     }
 
     // --- LISTAR CON STOCK TOTAL ---
-    async findAll(
+async findAll(
         page: number,
         limit: number,
         tenantId: string,
@@ -54,18 +54,28 @@ export class ProductsService {
             .leftJoinAndSelect('product.unit', 'unit')
             .leftJoinAndSelect('product.provider', 'provider')
             .leftJoinAndSelect('product.stocks', 'stocks')
-            .leftJoinAndSelect('stocks.branch', 'branch') // Lo dejamos para el cálculo, aunque luego lo quites
+            .leftJoinAndSelect('stocks.branch', 'branch')
             .where('product.tenant_id = :tenantId', { tenantId });
 
-        // 👇 MEJORA: Búsqueda segura por Nombre, SKU o Código de Barras
+        // 👇 MEJORA: Búsqueda "Modo Google" (Palabras sueltas + Proveedor)
         if (search) {
-            query.andWhere(
-                new Brackets((qb) => {
-                    qb.where('product.name ILIKE :search', { search: `%${search}%` })
-                        .orWhere('product.sku ILIKE :search', { search: `%${search}%` })
-                        .orWhere('product.barcode ILIKE :search', { search: `%${search}%` }); // <--- AGREGADO
-                })
-            );
+            // 1. Limpiamos espacios extra y cortamos en palabras
+            // Ej: "  Caño   110 " -> ["Caño", "110"]
+            const terms = search.trim().split(/\s+/);
+
+            // 2. Por cada palabra, agregamos una condición OBLIGATORIA (AND)
+            terms.forEach((term, index) => {
+                const termParam = `term_${index}`; // Nombre único para la variable
+                
+                query.andWhere(new Brackets((qb) => {
+                    // La palabra debe estar en Nombre O Sku O Codigo O Proveedor
+                    qb.where(`product.name ILIKE :${termParam}`, { [termParam]: `%${term}%` })
+                      .orWhere(`product.sku ILIKE :${termParam}`, { [termParam]: `%${term}%` })
+                      .orWhere(`product.barcode ILIKE :${termParam}`, { [termParam]: `%${term}%` })
+                      // 👇 CLAVE: Ahora tu papá puede buscar por marca/proveedor también
+                      .orWhere(`provider.name ILIKE :${termParam}`, { [termParam]: `%${term}%` });
+                }));
+            });
         }
 
         if (categoryId) {
@@ -91,7 +101,6 @@ export class ProductsService {
         const enrichedProducts = products.map(p => {
             const totalStock = p.stocks?.reduce((sum, stock) => sum + Number(stock.quantity), 0) || 0;
 
-            // Quitamos la lista detallada para no ensuciar el JSON de la lista principal
             const { stocks, ...productData } = p;
 
             return {
@@ -314,13 +323,6 @@ export class ProductsService {
         defaults?: { categoryId?: string; unitId?: string; margin?: number; vat?: number; discount?: number; skuPrefix?: string }
     ) {
 
-        console.log("----------------------------------------------");
-        console.log("📦 IMPORTANDO EXCEL - DEBUG DEFAULTS");
-        console.log("VALOR DE DEFAULTS RECIBIDO:", JSON.stringify(defaults));
-        console.log("VALOR EXACTO DE VAT:", defaults?.vat);
-        console.log("TIPO DE VAT:", typeof defaults?.vat);
-        console.log("----------------------------------------------");
-
         const workbook = XLSX.read(file.buffer, { type: 'buffer' });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         // Usamos raw: false para leer lo que ve el usuario, defval para no perder columnas
@@ -340,49 +342,28 @@ export class ProductsService {
         const findCatId = (name: string) => allCategories.find(c => c.name.toLowerCase() === String(name).toLowerCase())?.id;
         const findUnitId = (name: string) => allUnits.find(u => u.name.toLowerCase() === String(name).toLowerCase() || u.short_name.toLowerCase() === String(name).toLowerCase())?.id;
 
-        // --- CEREBRO BILINGÜE DE PRECIOS 🧠 ---
         const cleanPrice = (val: any): number => {
             if (!val) return 0;
             if (typeof val === 'number') return val;
 
             let s = String(val).trim();
-            // Quitamos todo lo que no sea número, punto o coma
-            s = s.replace(/[^\d.,-]/g, '');
-            if (!s) return 0;
+            if (!s || s === '-') return 0;
 
-            const hasDot = s.includes('.');
-            const hasComma = s.includes(',');
-
-            if (hasDot && hasComma) {
-                // Caso mixto: 1.500,00 (ARG) vs 1,500.00 (USA)
-                const lastDot = s.lastIndexOf('.');
-                const lastComma = s.lastIndexOf(',');
-
-                if (lastDot > lastComma) {
-                    // USA: 1,500.50 -> Quitamos comas
-                    s = s.replace(/,/g, '');
-                } else {
-                    // ARG: 1.500,50 -> Quitamos puntos, coma a punto
-                    s = s.replace(/\./g, '').replace(',', '.');
-                }
-            } else if (hasDot) {
-                // Solo puntos: 1.500 (Mil) vs 1.5 (Uno y medio)
-                const parts = s.split('.');
-                // Si tiene más de un punto (1.000.000) o la parte final tiene 3 dígitos exactos (1.650)
-                // Asumimos miles.
-                if (parts.length > 2 || (parts.length > 1 && parts[parts.length - 1].length === 3)) {
-                    s = s.replace(/\./g, '');
-                }
-                // Si no (10.5, 50.99), es decimal normal.
-            } else if (hasComma) {
-                // Solo comas: 1,500 (Mil USA) vs 1,5 (Uno y medio ARG)
-                const parts = s.split(',');
-                if (parts.length > 2 || (parts.length > 1 && parts[parts.length - 1].length === 3)) {
-                    s = s.replace(/,/g, ''); // Era miles USA
-                } else {
-                    s = s.replace(',', '.'); // Era decimal ARG
-                }
+            // CASO A: Formato Argentino/Europeo (Tiene coma)
+            // Ej: "1.850,595" o "200,50"
+            if (s.includes(',')) {
+                s = s.replace(/\./g, ''); // Chau puntos de miles
+                s = s.replace(',', '.');  // La coma se vuelve punto decimal
             }
+            // CASO B: Formato USA/Científico (Solo tiene puntos, NO comas)
+            // Ej: "12154895.50" o "27639.689"
+            else {
+                // NO borramos el punto, porque es el decimal.
+                // Solo limpiamos basura alrededor ($ uARS)
+            }
+
+            // Limpieza final de caracteres no numéricos (salvo el punto y el menos)
+            s = s.replace(/[^\d.-]/g, '');
 
             return parseFloat(s) || 0;
         };
