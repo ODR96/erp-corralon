@@ -1164,9 +1164,17 @@ export const ProductsPage = () => {
         <form onSubmit={handleSubmit}>
           <DialogTitle>
             {isEditing ? "Editar Producto" : "Nuevo Producto"}
+            <Typography
+              variant="caption"
+              component="div"
+              color="text.secondary"
+            >
+              Los campos con * son obligatorios
+            </Typography>
           </DialogTitle>
           <DialogContent dividers>
             <Grid container spacing={2}>
+              {/* SECCIÓN 1: DATOS GENERALES */}
               <Grid item xs={12}>
                 <Typography
                   variant="overline"
@@ -1176,6 +1184,7 @@ export const ProductsPage = () => {
                   Datos Generales
                 </Typography>
               </Grid>
+
               <Grid item xs={12} sm={8}>
                 <TextField
                   label="Nombre del Producto *"
@@ -1196,8 +1205,23 @@ export const ProductsPage = () => {
                     setFormData({ ...formData, sku: e.target.value })
                   }
                   disabled={isEditing}
+                  helperText={isEditing ? "El SKU no se puede modificar" : ""}
                 />
               </Grid>
+
+              <Grid item xs={12}>
+                <TextField
+                  label="Descripción"
+                  fullWidth
+                  multiline
+                  rows={2}
+                  value={formData.description}
+                  onChange={(e) =>
+                    setFormData({ ...formData, description: e.target.value })
+                  }
+                />
+              </Grid>
+
               <Grid item xs={6} sm={4}>
                 <TextField
                   label="Código Barras"
@@ -1228,23 +1252,29 @@ export const ProductsPage = () => {
                   options={units}
                 />
               </Grid>
+
+              {/* TABLA DE STOCK (SOLO EDICIÓN) */}
               {isEditing && (
                 <Grid item xs={12}>
                   <StockPerBranchTable stocks={stockDetails} />
                 </Grid>
               )}
+
               <Grid item xs={12}>
-                <Divider />
+                <Divider sx={{ my: 1 }} />
               </Grid>
+
+              {/* SECCIÓN 2: PRECIOS */}
               <Grid item xs={12}>
                 <Typography
                   variant="overline"
                   color="primary"
                   fontWeight="bold"
                 >
-                  Precios
+                  Precios y Costos
                 </Typography>
               </Grid>
+
               <Grid item xs={6} sm={3}>
                 <CustomSelect
                   label="Moneda"
@@ -1286,8 +1316,10 @@ export const ProductsPage = () => {
                   disabled
                   fullWidth
                   value={Number(formData.cost_price).toFixed(2)}
+                  helperText="Cálculo automático"
                 />
               </Grid>
+
               <Grid item xs={4} sm={4}>
                 <TextField
                   label="Margen %"
@@ -1319,7 +1351,13 @@ export const ProductsPage = () => {
                   InputProps={{ readOnly: true }}
                 />
               </Grid>
+
               <Grid item xs={12}>
+                <Divider sx={{ my: 1 }} />
+              </Grid>
+
+              {/* SECCIÓN 3: OTROS */}
+              <Grid item xs={12} sm={6}>
                 <CustomSelect
                   label="Proveedor"
                   value={formData.provider_id}
@@ -1330,12 +1368,27 @@ export const ProductsPage = () => {
                   noneLabel="Sin Proveedor"
                 />
               </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Alerta Stock Mínimo"
+                  type="number"
+                  fullWidth
+                  value={formData.min_stock_alert}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      min_stock_alert: e.target.value,
+                    })
+                  }
+                  helperText="Avisa cuando el stock es menor a esto"
+                />
+              </Grid>
             </Grid>
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setOpen(false)}>Cancelar</Button>
-            <Button type="submit" variant="contained">
-              Guardar
+            <Button type="submit" variant="contained" size="large">
+              Guardar Producto
             </Button>
           </DialogActions>
         </form>
@@ -1350,25 +1403,34 @@ export const ProductsPage = () => {
       >
         <Box sx={{ p: 3 }}>
           <Typography variant="h6" gutterBottom>
-            Importador
+            Asistente de Importación ({filesToImport?.length} archivos)
           </Typography>
+
           {importStep === 1 ? (
+            // --- PASO 1: CONFIGURACIÓN GENERAL ---
             <Grid container spacing={2}>
-              {/* Contenido Paso 1 */}
               <Grid item xs={12}>
+                <Typography variant="subtitle2" color="primary">
+                  1. Datos del Proveedor y Códigos
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={8}>
                 <CustomSelect
-                  label="Proveedor"
+                  label="Seleccionar Proveedor"
                   value={selectedImportProvider}
                   onChange={(e: any) =>
                     setSelectedImportProvider(e.target.value)
                   }
                   options={providers}
+                  noneLabel="-- Sin asignar --"
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid item xs={12} sm={4}>
                 <TextField
-                  label="Prefijo"
+                  label="Prefijo SKU (Opcional)"
+                  placeholder="Ej: MOT-"
                   fullWidth
+                  size="small"
                   value={importConfig.skuPrefix}
                   onChange={(e) =>
                     setImportConfig({
@@ -1376,69 +1438,250 @@ export const ProductsPage = () => {
                       skuPrefix: e.target.value,
                     })
                   }
+                  helperText="Ej: 123 -> MOT-123"
                 />
               </Grid>
+
+              <Grid item xs={12}>
+                <Typography variant="subtitle2" color="primary" sx={{ mt: 2 }}>
+                  2. Valores por Defecto (Si el Excel no los tiene)
+                </Typography>
+              </Grid>
+              <Grid item xs={6}>
+                <CustomSelect
+                  label="Rubro por defecto"
+                  value={importConfig.categoryId}
+                  onChange={(e: any) =>
+                    setImportConfig({
+                      ...importConfig,
+                      categoryId: e.target.value,
+                    })
+                  }
+                  options={categories}
+                  noneLabel="-- Ninguno --"
+                />
+              </Grid>
+              <Grid item xs={6}>
+                <CustomSelect
+                  label="Unidad por defecto"
+                  value={importConfig.unitId}
+                  onChange={(e: any) =>
+                    setImportConfig({ ...importConfig, unitId: e.target.value })
+                  }
+                  options={units}
+                  noneLabel="-- Ninguna --"
+                />
+              </Grid>
+
+              <Grid item xs={12}>
+                <Typography variant="subtitle2" color="primary" sx={{ mt: 2 }}>
+                  3. Reglas de Precios (Se aplican a TODOS los items)
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Costo Real = Precio Lista - Descuento. <br />
+                  Precio Venta = Costo Real + Ganancia + IVA.
+                </Typography>
+              </Grid>
+
+              <Grid item xs={4}>
+                <TextField
+                  label="Desc. Prov %"
+                  type="number"
+                  fullWidth
+                  size="small"
+                  value={importConfig.discount}
+                  onChange={(e) =>
+                    setImportConfig({
+                      ...importConfig,
+                      discount: Number(e.target.value),
+                    })
+                  }
+                />
+              </Grid>
+              <Grid item xs={4}>
+                <TextField
+                  label="Tu Ganancia %"
+                  type="number"
+                  fullWidth
+                  size="small"
+                  value={importConfig.margin}
+                  onChange={(e) =>
+                    setImportConfig({
+                      ...importConfig,
+                      margin: Number(e.target.value),
+                    })
+                  }
+                />
+              </Grid>
+              <Grid item xs={4}>
+                <CustomSelect
+                  label="IVA Venta %"
+                  value={importConfig.vat}
+                  onChange={(e: any) =>
+                    setImportConfig({
+                      ...importConfig,
+                      vat: Number(e.target.value),
+                    })
+                  }
+                  options={VAT_OPTIONS}
+                />
+              </Grid>
+
               <Grid
                 item
                 xs={12}
-                sx={{ mt: 2, display: "flex", justifyContent: "flex-end" }}
+                sx={{
+                  mt: 3,
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: 2,
+                }}
               >
+                <Button onClick={() => setImportModalOpen(false)}>
+                  Cancelar
+                </Button>
                 <Button
                   variant="contained"
                   onClick={handleAnalyze}
                   disabled={analyzing}
+                  startIcon={
+                    analyzing ? (
+                      <CircularProgress size={20} color="inherit" />
+                    ) : null
+                  }
                 >
-                  {analyzing ? "Procesando..." : "Siguiente"}
+                  {analyzing ? "Procesando..." : "Siguiente: Mapear Columnas"}
                 </Button>
               </Grid>
             </Grid>
           ) : (
-            <Grid container spacing={2}>
-              {/* Contenido Paso 2 */}
-              <Grid item xs={6}>
-                <CustomSelect
-                  label="Nombre"
-                  value={columnMapping.name}
-                  onChange={(e: any) =>
-                    setColumnMapping({ ...columnMapping, name: e.target.value })
-                  }
-                  options={detectedHeaders}
-                />
+            // --- PASO 2: MAPEO DE COLUMNAS ---
+            <>
+              <Typography variant="body2" sx={{ mb: 2 }}>
+                Indica qué columna del Excel corresponde a cada dato del
+                sistema.
+              </Typography>
+              <Grid container spacing={2}>
+                {/* FILA 1: Identificación y Costo */}
+                <Grid item xs={12} md={4}>
+                  <CustomSelect
+                    label="DESCRIPCIÓN / NOMBRE *"
+                    value={columnMapping.name}
+                    error={columnMapping.name === ""}
+                    onChange={(e: any) =>
+                      setColumnMapping({
+                        ...columnMapping,
+                        name: e.target.value,
+                      })
+                    }
+                    options={detectedHeaders}
+                  />
+                </Grid>
+                <Grid item xs={6} md={4}>
+                  <CustomSelect
+                    label="CÓDIGO / SKU"
+                    value={columnMapping.sku}
+                    onChange={(e: any) =>
+                      setColumnMapping({
+                        ...columnMapping,
+                        sku: e.target.value,
+                      })
+                    }
+                    options={detectedHeaders}
+                    noneLabel="(Ignorar / Generar auto)"
+                  />
+                </Grid>
+                <Grid item xs={6} md={4}>
+                  <CustomSelect
+                    label="PRECIO DE LISTA"
+                    value={columnMapping.cost_price}
+                    onChange={(e: any) =>
+                      setColumnMapping({
+                        ...columnMapping,
+                        cost_price: e.target.value,
+                      })
+                    }
+                    options={detectedHeaders}
+                    noneLabel="(Ignorar / Precio 0)"
+                  />
+                </Grid>
+
+                {/* FILA 2: Clasificación (Opcional) */}
+                <Grid item xs={6} md={6}>
+                  <CustomSelect
+                    label="Columna RUBRO (Opcional)"
+                    value={columnMapping.category}
+                    onChange={(e: any) =>
+                      setColumnMapping({
+                        ...columnMapping,
+                        category: e.target.value,
+                      })
+                    }
+                    options={detectedHeaders}
+                    noneLabel="(Usar el Rubro por defecto)"
+                    helperText="Si el Excel tiene una columna de rubros."
+                  />
+                </Grid>
+                <Grid item xs={6} md={6}>
+                  <CustomSelect
+                    label="Columna UNIDAD (Opcional)"
+                    value={columnMapping.unit}
+                    onChange={(e: any) =>
+                      setColumnMapping({
+                        ...columnMapping,
+                        unit: e.target.value,
+                      })
+                    }
+                    options={detectedHeaders}
+                    noneLabel="(Usar la Unidad por defecto)"
+                  />
+                </Grid>
+
+                {/* FILA 3: Avanzados */}
+                <Grid item xs={6} md={6}>
+                  <CustomSelect
+                    label="Columna IVA %"
+                    value={columnMapping.vat}
+                    onChange={(e: any) =>
+                      setColumnMapping({
+                        ...columnMapping,
+                        vat: e.target.value,
+                      })
+                    }
+                    options={detectedHeaders}
+                    noneLabel="(Usar el IVA configurado)"
+                    helperText="Si cada producto tiene IVA distinto."
+                  />
+                </Grid>
+                <Grid item xs={6} md={6}>
+                  <CustomSelect
+                    label="Columna MONEDA"
+                    value={columnMapping.currency}
+                    onChange={(e: any) =>
+                      setColumnMapping({
+                        ...columnMapping,
+                        currency: e.target.value,
+                      })
+                    }
+                    options={detectedHeaders}
+                    noneLabel="(Siempre ARS)"
+                    helperText="Solo si el Excel mezcla USD y ARS."
+                  />
+                </Grid>
               </Grid>
-              <Grid item xs={6}>
-                <CustomSelect
-                  label="SKU"
-                  value={columnMapping.sku}
-                  onChange={(e: any) =>
-                    setColumnMapping({ ...columnMapping, sku: e.target.value })
-                  }
-                  options={detectedHeaders}
-                />
-              </Grid>
-              <Grid item xs={6}>
-                <CustomSelect
-                  label="Costo"
-                  value={columnMapping.cost_price}
-                  onChange={(e: any) =>
-                    setColumnMapping({
-                      ...columnMapping,
-                      cost_price: e.target.value,
-                    })
-                  }
-                  options={detectedHeaders}
-                />
-              </Grid>
-              <Grid
-                item
-                xs={12}
-                sx={{ mt: 2, display: "flex", justifyContent: "space-between" }}
-              >
+
+              <Box display="flex" justifyContent="space-between" mt={4}>
                 <Button onClick={() => setImportStep(1)}>Atrás</Button>
-                <Button variant="contained" onClick={handleFinalImport}>
-                  Importar
+                <Button
+                  variant="contained"
+                  onClick={handleFinalImport}
+                  disabled={columnMapping.name === ""}
+                  size="large"
+                >
+                  Importar Productos
                 </Button>
-              </Grid>
-            </Grid>
+              </Box>
+            </>
           )}
         </Box>
       </Dialog>
