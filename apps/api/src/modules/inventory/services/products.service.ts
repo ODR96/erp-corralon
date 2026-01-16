@@ -38,7 +38,7 @@ export class ProductsService {
     }
 
     // --- LISTAR CON STOCK TOTAL ---
-async findAll(
+    async findAll(
         page: number,
         limit: number,
         tenantId: string,
@@ -66,14 +66,14 @@ async findAll(
             // 2. Por cada palabra, agregamos una condición OBLIGATORIA (AND)
             terms.forEach((term, index) => {
                 const termParam = `term_${index}`; // Nombre único para la variable
-                
+
                 query.andWhere(new Brackets((qb) => {
                     // La palabra debe estar en Nombre O Sku O Codigo O Proveedor
                     qb.where(`product.name ILIKE :${termParam}`, { [termParam]: `%${term}%` })
-                      .orWhere(`product.sku ILIKE :${termParam}`, { [termParam]: `%${term}%` })
-                      .orWhere(`product.barcode ILIKE :${termParam}`, { [termParam]: `%${term}%` })
-                      // 👇 CLAVE: Ahora tu papá puede buscar por marca/proveedor también
-                      .orWhere(`provider.name ILIKE :${termParam}`, { [termParam]: `%${term}%` });
+                        .orWhere(`product.sku ILIKE :${termParam}`, { [termParam]: `%${term}%` })
+                        .orWhere(`product.barcode ILIKE :${termParam}`, { [termParam]: `%${term}%` })
+                        // 👇 CLAVE: Ahora tu papá puede buscar por marca/proveedor también
+                        .orWhere(`provider.name ILIKE :${termParam}`, { [termParam]: `%${term}%` });
                 }));
             });
         }
@@ -346,24 +346,34 @@ async findAll(
             if (!val) return 0;
             if (typeof val === 'number') return val;
 
-            let s = String(val).trim();
+            // 1. Limpieza base: dejamos solo números, puntos, comas y menos.
+            let s = String(val).trim().replace(/[^\d.,-]/g, '');
+
             if (!s || s === '-') return 0;
 
-            // CASO A: Formato Argentino/Europeo (Tiene coma)
-            // Ej: "1.850,595" o "200,50"
-            if (s.includes(',')) {
-                s = s.replace(/\./g, ''); // Chau puntos de miles
-                s = s.replace(',', '.');  // La coma se vuelve punto decimal
-            }
-            // CASO B: Formato USA/Científico (Solo tiene puntos, NO comas)
-            // Ej: "12154895.50" o "27639.689"
-            else {
-                // NO borramos el punto, porque es el decimal.
-                // Solo limpiamos basura alrededor ($ uARS)
-            }
+            const hasComma = s.includes(',');
+            const hasDot = s.includes('.');
 
-            // Limpieza final de caracteres no numéricos (salvo el punto y el menos)
-            s = s.replace(/[^\d.-]/g, '');
+            // CASO A: TIENE COMA (Lista Vieja / Estándar) -> Es seguro
+            // La coma protege los decimales, así que no se volverá millonario.
+            if (hasComma) {
+                s = s.replace(/\./g, ''); // Borramos puntos de mil
+                s = s.replace(',', '.');  // Coma se vuelve punto decimal
+            }
+            // CASO B: SOLO TIENE PUNTO (Lista Nueva tramposa)
+            else if (hasDot) {
+                // Dividimos por el punto para ver qué hay al final
+                const parts = s.split('.');
+                const decimals = parts[parts.length - 1];
+
+                // REGLA DE ORO: Si termina en exactamente 3 dígitos, asumimos que es MIL
+                // Ej: "2.736" -> 2736
+                // Ej: "1.000" -> 1000
+                if (decimals.length === 3) {
+                    s = s.replace(/\./g, '');
+                }
+                // Si termina en 1 o 2 dígitos (ej 10.5 o 99.99), lo dejamos como decimal.
+            }
 
             return parseFloat(s) || 0;
         };
