@@ -343,52 +343,59 @@ export class ProductsService {
         const findUnitId = (name: string) => allUnits.find(u => u.name.toLowerCase() === String(name).toLowerCase() || u.short_name.toLowerCase() === String(name).toLowerCase())?.id;
 
         const cleanPrice = (val: any): number => {
-            // 1. CHIVATO: Muestra en la terminal qué llega exactamente
-            if (val) console.log(`🔍 DATO CRUDO: "${val}" | TIPO: ${typeof val}`);
-
-            if (!val) return 0;
-
-            // Si ya llega como número (Ej: 2736), Excel lo leyó bien. 
-            // ¡OJO! Si llega 2.736 (número chico), es que Excel o la librería están configurados en Inglés.
-            if (typeof val === 'number') {
-                // PARCHE DE EMERGENCIA: 
-                // Si el número es menor a 100 y tiene 3 decimales "ocultos", podría ser un mil mal leído.
-                // Pero por ahora, confiemos en que si es número, es número.
-                return val;
-            }
+            if (val === null || val === undefined) return 0;
+            // Si ya viene número, confiamos (pero ojo con los .000 ocultos en Excel)
+            if (typeof val === 'number') return val;
 
             let s = String(val).trim();
-
-            // Limpiamos basura pero dejamos puntos y comas
+            // 1. Limpieza: Dejamos solo números, puntos, comas y signos menos
             s = s.replace(/[^\d.,-]/g, '');
 
             if (!s || s === '-') return 0;
 
-            const hasComma = s.includes(',');
-            const hasDot = s.includes('.');
+            const lastDot = s.lastIndexOf('.');
+            const lastComma = s.lastIndexOf(',');
 
-            // CASO A: TIENE COMA (Formato Argentino Seguro) -> 1.200,50
-            if (hasComma) {
-                s = s.replace(/\./g, ''); // Chau puntos de mil
-                s = s.replace(',', '.');  // Coma a punto
+            // CASO 1: TIENE AMBOS (Punto y Coma) -> El que está al final GANA como decimal
+            if (lastDot > -1 && lastComma > -1) {
+                if (lastDot > lastComma) {
+                    // Ej: "241,985.79" (Punto gana) -> Modo USA
+                    s = s.replace(/,/g, ''); // Borramos comas de miles
+                    // El punto queda como decimal
+                } else {
+                    // Ej: "241.985,79" (Coma gana) -> Modo ARG
+                    s = s.replace(/\./g, ''); // Borramos puntos de miles
+                    s = s.replace(/,/g, '.'); // La coma se vuelve punto
+                }
             }
-            // CASO B: SOLO TIENE PUNTO (El caso maldito) -> 2.736
-            else if (hasDot) {
+            // CASO 2: SOLO TIENE PUNTO
+            else if (lastDot > -1) {
+                // Ej: "2.736" o "10.50"
                 const parts = s.split('.');
                 const decimals = parts[parts.length - 1];
-
-                // SI TIENE EXACTAMENTE 3 DECIMALES -> ASUMIMOS QUE ES MIL
-                // Ej: "2.736" -> Se vuelve 2736
+                // Regla de 3 dígitos: Si termina en .### (y no es .50), asumimos que es MIL
                 if (decimals.length === 3) {
-                    console.log(`   ⚠️ DETECTADO PUNTO DE MIL: "${val}" -> Pasará a ser entero.`);
                     s = s.replace(/\./g, '');
                 }
-                // Si tiene 1 o 2 (ej: 10.50), se queda como decimal.
+                // Si no, es decimal standard (10.50)
+            }
+            // CASO 3: SOLO TIENE COMA
+            else if (lastComma > -1) {
+                // Ej: "2,736" o "10,50"
+                const parts = s.split(',');
+                const decimals = parts[parts.length - 1];
+                // Regla de 3 dígitos: Si termina en ,### asumimos MIL (Raro pero posible en USA integers)
+                if (decimals.length === 3) {
+                    s = s.replace(/,/g, '');
+                } else {
+                    // Es decimal (Caso ARG standard sin miles: 150,50)
+                    s = s.replace(/,/g, '.');
+                }
             }
 
-            const resultado = parseFloat(s) || 0;
-            console.log(`   ✅ RESULTADO FINAL: ${resultado}`);
-            return resultado;
+            const result = parseFloat(s);
+            // console.log(`In: "${val}" -> Out: ${result}`); // Descomentar si quieres ver logs
+            return isNaN(result) ? 0 : result;
         };
         // ----------------------------------------
 
