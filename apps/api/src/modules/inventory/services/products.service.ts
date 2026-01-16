@@ -343,39 +343,52 @@ export class ProductsService {
         const findUnitId = (name: string) => allUnits.find(u => u.name.toLowerCase() === String(name).toLowerCase() || u.short_name.toLowerCase() === String(name).toLowerCase())?.id;
 
         const cleanPrice = (val: any): number => {
-            if (!val) return 0;
-            if (typeof val === 'number') return val;
+            // 1. CHIVATO: Muestra en la terminal qué llega exactamente
+            if (val) console.log(`🔍 DATO CRUDO: "${val}" | TIPO: ${typeof val}`);
 
-            // 1. Limpieza base: dejamos solo números, puntos, comas y menos.
-            let s = String(val).trim().replace(/[^\d.,-]/g, '');
+            if (!val) return 0;
+
+            // Si ya llega como número (Ej: 2736), Excel lo leyó bien. 
+            // ¡OJO! Si llega 2.736 (número chico), es que Excel o la librería están configurados en Inglés.
+            if (typeof val === 'number') {
+                // PARCHE DE EMERGENCIA: 
+                // Si el número es menor a 100 y tiene 3 decimales "ocultos", podría ser un mil mal leído.
+                // Pero por ahora, confiemos en que si es número, es número.
+                return val;
+            }
+
+            let s = String(val).trim();
+
+            // Limpiamos basura pero dejamos puntos y comas
+            s = s.replace(/[^\d.,-]/g, '');
 
             if (!s || s === '-') return 0;
 
             const hasComma = s.includes(',');
             const hasDot = s.includes('.');
 
-            // CASO A: TIENE COMA (Lista Vieja / Estándar) -> Es seguro
-            // La coma protege los decimales, así que no se volverá millonario.
+            // CASO A: TIENE COMA (Formato Argentino Seguro) -> 1.200,50
             if (hasComma) {
-                s = s.replace(/\./g, ''); // Borramos puntos de mil
-                s = s.replace(',', '.');  // Coma se vuelve punto decimal
+                s = s.replace(/\./g, ''); // Chau puntos de mil
+                s = s.replace(',', '.');  // Coma a punto
             }
-            // CASO B: SOLO TIENE PUNTO (Lista Nueva tramposa)
+            // CASO B: SOLO TIENE PUNTO (El caso maldito) -> 2.736
             else if (hasDot) {
-                // Dividimos por el punto para ver qué hay al final
                 const parts = s.split('.');
                 const decimals = parts[parts.length - 1];
 
-                // REGLA DE ORO: Si termina en exactamente 3 dígitos, asumimos que es MIL
-                // Ej: "2.736" -> 2736
-                // Ej: "1.000" -> 1000
+                // SI TIENE EXACTAMENTE 3 DECIMALES -> ASUMIMOS QUE ES MIL
+                // Ej: "2.736" -> Se vuelve 2736
                 if (decimals.length === 3) {
+                    console.log(`   ⚠️ DETECTADO PUNTO DE MIL: "${val}" -> Pasará a ser entero.`);
                     s = s.replace(/\./g, '');
                 }
-                // Si termina en 1 o 2 dígitos (ej 10.5 o 99.99), lo dejamos como decimal.
+                // Si tiene 1 o 2 (ej: 10.50), se queda como decimal.
             }
 
-            return parseFloat(s) || 0;
+            const resultado = parseFloat(s) || 0;
+            console.log(`   ✅ RESULTADO FINAL: ${resultado}`);
+            return resultado;
         };
         // ----------------------------------------
 
