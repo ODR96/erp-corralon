@@ -5,6 +5,7 @@ import { UpdateProductDto } from '../dto/update-product.dto';
 import { AuthGuard } from '@nestjs/passport';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { GetUser } from '../../auth/decorators/get-user.decorator';
 
 // 👇 IMPORTAMOS LA NUEVA SEGURIDAD
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -24,30 +25,32 @@ export class ProductsController {
     }
 
     @Get()
-    @RequirePermissions('inventory.view')
     findAll(
-        @Query('page') page: string,
-        @Query('limit') limit: string,
-        @Query('search') search: string,
-        @Query('categoryId') categoryId: string,
-        @Query('providerId') providerId: string,
-        @Query('withDeleted') withDeleted: string, // <--- Agregamos esto para el filtro
-        @Request() req: any,
+        @GetUser('tenantId') tenantId: string,
+        @Query('page') page = 1,
+        @Query('limit') limit = 10,
+        @Query('search') search = '',
+        @Query('categoryId') categoryId = '',
+        @Query('providerId') providerId = '',
+        @Query('withDeleted') withDeleted = 'false',
+        @Query('showHidden') showHidden = 'false', // 👈 NUEVO: Filtro
     ) {
-        // 👇 FIX CRÍTICO: El tenant ahora viene anidado
-        const tenantId = req.user.tenant?.id;
-        const pageNumber = page ? Number(page) : 1;
-        const limitNumber = limit ? Number(limit) : 100;
-
         return this.productsService.findAll(
-            pageNumber,
-            limitNumber,
+            Number(page),
+            Number(limit),
             tenantId,
             search,
             categoryId,
             providerId,
-            withDeleted === 'true' // Convertimos string a boolean
+            withDeleted === 'true',
+            showHidden === 'true' // 👈 Pasamos el valor
         );
+    }
+
+    // 👇 NUEVO ENDPOINT: Tocar la estrella
+    @Patch(':id/toggle-visibility')
+    toggleVisibility(@Param('id') id: string) {
+        return this.productsService.toggleVisibility(id);
     }
 
     @Get('export/excel')
@@ -76,9 +79,6 @@ export class ProductsController {
         const tenantId = req.user.tenant?.id;
         const columnMap = body.column_map ? JSON.parse(body.column_map) : null;
 
-        console.log("------------------------------------------------");
-        console.log("📨 BODY RAW RECIBIDO:", JSON.stringify(body, null, 2));
-        console.log("------------------------------------------------");
         // Empaquetamos los defaults
         const parse = (val: any) => {
             if (val === undefined || val === null || String(val).trim() === '') return undefined;

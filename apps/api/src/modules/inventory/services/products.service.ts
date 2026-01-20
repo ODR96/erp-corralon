@@ -39,16 +39,12 @@ export class ProductsService {
 
     // --- LISTAR CON STOCK TOTAL ---
     async findAll(
-        page: number,
-        limit: number,
-        tenantId: string,
-        search: string,
-        categoryId: string,
-        providerId: string,
-        withDeleted: boolean = false
+        page: number, limit: number, tenantId: string,
+        search: string, categoryId: string, providerId: string,
+        withDeleted: boolean = false,
+        showHidden: boolean = false // 👈 Parametro Nuevo
     ) {
         const skip = (page - 1) * limit;
-
         const query = this.productRepo.createQueryBuilder('product')
             .leftJoinAndSelect('product.category', 'category')
             .leftJoinAndSelect('product.unit', 'unit')
@@ -57,59 +53,49 @@ export class ProductsService {
             .leftJoinAndSelect('stocks.branch', 'branch')
             .where('product.tenant_id = :tenantId', { tenantId });
 
-        // 👇 MEJORA: Búsqueda "Modo Google" (Palabras sueltas + Proveedor)
+        // ⭐ LÓGICA DE CATÁLOGO PRO:
+        // Si NO pidió ver ocultos y NO está buscando nada específico -> Solo muestra visibles (Mis Productos)
+        // Si está buscando texto, buscamos en TODO (para que encuentres cosas del catálogo)
+        if (!showHidden && !search) {
+            query.andWhere('product.is_visible = :visible', { visible: true });
+        }
+
         if (search) {
-            // 1. Limpiamos espacios extra y cortamos en palabras
-            // Ej: "  Caño   110 " -> ["Caño", "110"]
             const terms = search.trim().split(/\s+/);
-
-            // 2. Por cada palabra, agregamos una condición OBLIGATORIA (AND)
             terms.forEach((term, index) => {
-                const termParam = `term_${index}`; // Nombre único para la variable
-
+                const termParam = `term_${index}`;
                 query.andWhere(new Brackets((qb) => {
-                    // La palabra debe estar en Nombre O Sku O Codigo O Proveedor
                     qb.where(`product.name ILIKE :${termParam}`, { [termParam]: `%${term}%` })
                         .orWhere(`product.sku ILIKE :${termParam}`, { [termParam]: `%${term}%` })
                         .orWhere(`product.barcode ILIKE :${termParam}`, { [termParam]: `%${term}%` })
-                        // 👇 CLAVE: Ahora tu papá puede buscar por marca/proveedor también
                         .orWhere(`provider.name ILIKE :${termParam}`, { [termParam]: `%${term}%` });
                 }));
             });
         }
 
-        if (categoryId) {
-            query.andWhere('product.category.id = :categoryId', { categoryId });
-        }
-
-        if (providerId) {
-            query.andWhere('product.provider.id = :providerId', { providerId });
-        }
-
-        if (withDeleted) {
-            query.withDeleted();
-        }
+        if (categoryId) query.andWhere('product.category.id = :categoryId', { categoryId });
+        if (providerId) query.andWhere('product.provider.id = :providerId', { providerId });
+        if (withDeleted) query.withDeleted();
 
         query.orderBy('product.name', 'ASC');
 
-        const [products, total] = await query
-            .take(limit)
-            .skip(skip)
-            .getManyAndCount();
+        const [products, total] = await query.take(limit).skip(skip).getManyAndCount();
 
-        // Enriquecemos con el total de stock
         const enrichedProducts = products.map(p => {
             const totalStock = p.stocks?.reduce((sum, stock) => sum + Number(stock.quantity), 0) || 0;
-
             const { stocks, ...productData } = p;
-
-            return {
-                ...productData,
-                total_stock: totalStock
-            };
+            return { ...productData, total_stock: totalStock };
         });
 
         return { data: enrichedProducts, total };
+    }
+
+    // --- 2. TOGGLE VISIBILITY (La Estrellita) ---
+    async toggleVisibility(id: string) {
+        const product = await this.productRepo.findOne({ where: { id } });
+        if (!product) throw new NotFoundException('Producto no encontrado');
+        product.is_visible = !product.is_visible;
+        return this.productRepo.save(product);
     }
 
     // --- BUSCAR UNO ---
@@ -320,7 +306,7 @@ export class ProductsService {
         tenantId: string,
         providerId?: string,
         columnMap?: any,
-        defaults?: { categoryId?: string; unitId?: string; margin?: number; vat?: number; discount?: number; skuPrefix?: string }
+        defaults?: { categoryId?: string; unitId?: string; margin?: number; vat?: number; discount?: number; skuPrefix?: string; importAsHidden?: boolean }
     ) {
 
         const workbook = XLSX.read(file.buffer, { type: 'buffer' });
@@ -522,11 +508,40 @@ export class ProductsService {
                 if (finalUnitId) data.unit = { id: finalUnitId };
                 if (providerId) data.provider = { id: providerId };
 
+const financialData = {
+                    list_price: finalCost,
+                    provider_discount: discount,
+                    cost_price: netCost,
+                    profit_margin: margin,
+                    vat_rate: vatRate,
+                    sale_price: salePrice,
+                    currency: currency
+                };
+
                 if (product) {
-                    await this.productRepo.update(product.id, data);
+                    // 🟢 SI EXISTE: Actualizamos SOLO precios.
+                    // NO tocamos 'name', 'sku', 'description' ni 'is_visible'.
+                    // Respetamos tus cambios manuales.
+                    await this.productRepo.update(product.id, {
+                        ...financialData,
+                        // Opcional: Si quieres forzar que se actualice la categoría o unidad del Excel, descomenta esto:
+                        // category: finalCategoryId ? { id: finalCategoryId } : undefined,
+                        // unit: finalUnitId ? { id: finalUnitId } : undefined,
+                    });
                     updated++;
                 } else {
-                    await this.productRepo.save(this.productRepo.create({ ...data, tenant: { id: tenantId } }));
+                    // 🔵 SI ES NUEVO: Creamos con TODO (Nombre del Excel + Precios)
+                    await this.productRepo.save(this.productRepo.create({
+                        ...financialData, // Precios
+                        name,             // Nombre del Excel
+                        sku: finalSku,
+                        category: finalCategoryId ? { id: finalCategoryId } : undefined,
+                        unit: finalUnitId ? { id: finalUnitId } : undefined,
+                        provider: providerId ? { id: providerId } : undefined,
+                        tenant: { id: tenantId },
+                        // 👇 Aquí nace Oculto si marcaste el check, o Visible por defecto
+                        is_visible: !defaults?.importAsHidden 
+                    }));
                     created++;
                 }
 

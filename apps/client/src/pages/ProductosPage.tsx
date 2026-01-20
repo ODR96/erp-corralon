@@ -28,6 +28,8 @@ import {
   Card,
   CardContent,
   CircularProgress,
+  Tabs, // 🔥 Nuevo
+  Tab, // 🔥 Nuevo
 } from "@mui/material";
 import {
   Add,
@@ -43,6 +45,8 @@ import {
   Inventory2,
   CloudUpload,
   CloudDownload,
+  Star, // 🔥 Nuevo
+  StarBorder, // 🔥 Nuevo
 } from "@mui/icons-material";
 import { useNotification } from "../context/NotificationContext";
 import { inventoryService, settingsService } from "../services/api";
@@ -245,6 +249,9 @@ export const ProductsPage = () => {
   const [filterProv, setFilterProv] = useState("");
   const [withDeleted, setWithDeleted] = useState(false);
 
+  // 🔥 NUEVO: Estado para Tabs (0 = Mis Productos, 1 = Catálogo)
+  const [tabValue, setTabValue] = useState(0);
+
   // MODALES ABM
   const [open, setOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -252,7 +259,7 @@ export const ProductsPage = () => {
   const [formData, setFormData] = useState<any>(initialForm);
   const [stockDetails, setStockDetails] = useState<any[]>([]);
 
-  // 🔥 ESTADOS DEL STOCK (Aquí faltaban antes) 🔥
+  // ESTADOS DEL STOCK
   const [stockOpen, setStockOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [currentStock, setCurrentStock] = useState(0);
@@ -273,6 +280,8 @@ export const ProductsPage = () => {
   const [importStep, setImportStep] = useState(1);
   const [detectedHeaders, setDetectedHeaders] = useState<any[]>([]);
   const [headerRowIndex, setHeaderRowIndex] = useState(0);
+
+  // 🔥 MODIFICADO: Agregamos 'importAsHidden' y 'currency' a tu config original
   const [importConfig, setImportConfig] = useState({
     categoryId: "",
     unitId: "",
@@ -280,6 +289,8 @@ export const ProductsPage = () => {
     vat: 21,
     discount: 0,
     skuPrefix: "",
+    importAsHidden: true, // Nuevo
+    currency: "ARS", // Nuevo
   });
   const [columnMapping, setColumnMapping] = useState({
     name: "",
@@ -301,10 +312,18 @@ export const ProductsPage = () => {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  // 2. Cargar productos cuando cambia la búsqueda frenada
+  // 2. Cargar productos (🔥 Incluimos tabValue)
   useEffect(() => {
     loadProducts();
-  }, [page, rowsPerPage, debouncedSearch, filterCat, filterProv, withDeleted]);
+  }, [
+    page,
+    rowsPerPage,
+    debouncedSearch,
+    filterCat,
+    filterProv,
+    withDeleted,
+    tabValue,
+  ]);
 
   // 3. Configuración inicial
   useEffect(() => {
@@ -319,6 +338,7 @@ export const ProductsPage = () => {
           ...prev,
           margin: Number(config.default_profit_margin) || 30,
           vat: Number(config.default_vat_rate) || 21,
+          currency: "ARS",
         }));
       });
     }
@@ -364,18 +384,48 @@ export const ProductsPage = () => {
 
   const loadProducts = async () => {
     try {
+      // 🔥 Lógica de Tabs
+      const showHidden = tabValue === 1;
       const res = await inventoryService.getProducts(
         page + 1,
         rowsPerPage,
         debouncedSearch,
         filterCat,
         filterProv,
-        withDeleted
+        withDeleted,
+        showHidden // Enviamos el parámetro
       );
       setProducts(res.data);
       setTotal(res.total);
     } catch (err) {
       showNotification("Error cargando productos", "error");
+    }
+  };
+
+  // 🔥 NUEVO HANDLER: Toggle Estrella
+  const handleToggleStar = async (
+    id: string,
+    currentStatus: boolean,
+    e: any
+  ) => {
+    e.stopPropagation(); // Evitar abrir el modal de edición
+    try {
+      await inventoryService.toggleProductVisibility(id);
+
+      // Actualizamos visualmente el estado local
+      setProducts((prev) =>
+        prev.map((p) => {
+          if (p.id === id) return { ...p, is_visible: !currentStatus };
+          return p;
+        })
+      );
+
+      showNotification(
+        currentStatus ? "Movido al Catálogo" : "Activado en Stock",
+        "info"
+      );
+    } catch (error) {
+      showNotification("Error al cambiar estado", "error");
     }
   };
 
@@ -754,11 +804,31 @@ export const ProductsPage = () => {
           position: "sticky", // 👈 1. Se pega
           top: "70px", // 👈 2. Al techo de la pantalla
           zIndex: 100, // 👈 3. Se queda por ENCIMA de la tabla
-          bgcolor: "background.paper", // 👈 4. Fondo sólido (para que no se trasluzca la tabla al pasar por abajo)
-          boxShadow: 1, // 👈 (Opcional) Una sombrita para que se note que flota
+          bgcolor: "background.paper", // 👈 4. Fondo sólido
+          boxShadow: 1, // 👈 (Opcional) Una sombrita
         }}
       >
         <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
+          {/* 🔥 TABS DE CATÁLOGO VS MIS PRODUCTOS */}
+          <Tabs
+            value={tabValue}
+            onChange={(e, val) => setTabValue(val)}
+            textColor="primary"
+            indicatorColor="primary"
+            sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}
+          >
+            <Tab
+              label="Mis Productos (Stock)"
+              icon={<Store />}
+              iconPosition="start"
+            />
+            <Tab
+              label="Catálogo Completo (Proveedores)"
+              icon={<Search />}
+              iconPosition="start"
+            />
+          </Tabs>
+
           <Grid container spacing={2} alignItems="center">
             <Grid item xs={12} md={3}>
               <TextField
@@ -828,6 +898,8 @@ export const ProductsPage = () => {
         <Table sx={{ minWidth: 650 }}>
           <TableHead sx={{ bgcolor: "#f8f9fa" }}>
             <TableRow>
+              {/* 🔥 COLUMNA ESTRELLA */}
+              <TableCell width={50} align="center"></TableCell>
               <TableCell>DESCRIPCIÓN</TableCell>
               <TableCell>RUBRO</TableCell>
               <TableCell align="center">UNIDAD</TableCell>
@@ -847,15 +919,38 @@ export const ProductsPage = () => {
               const providerName = p.provider?.name;
               const providerColor = stringToColor(providerName || "");
 
+              // Determine if visible
+              const isVisible = p.is_visible;
+
               return (
                 <TableRow
                   key={p.id}
-                  sx={
-                    isDeleted
+                  sx={{
+                    ...(isDeleted
                       ? DELETED_ROW_STYLE
-                      : { "&:hover": { bgcolor: "#f5f5f5" } }
-                  }
+                      : { "&:hover": { bgcolor: "#f5f5f5" } }),
+                    opacity: !isVisible && tabValue === 1 ? 0.7 : 1, // Gris si está oculto en la pestaña Catálogo
+                  }}
                 >
+                  {/* 🔥 CELDA ESTRELLA */}
+                  <TableCell align="center">
+                    <Tooltip
+                      title={
+                        isVisible
+                          ? "Quitar de 'Mis Productos'"
+                          : "Activar en 'Mis Productos'"
+                      }
+                    >
+                      <IconButton
+                        size="small"
+                        onClick={(e) => handleToggleStar(p.id, isVisible, e)}
+                        color={isVisible ? "warning" : "default"}
+                      >
+                        {isVisible ? <Star /> : <StarBorder />}
+                      </IconButton>
+                    </Tooltip>
+                  </TableCell>
+
                   <TableCell>
                     <Stack direction="row" alignItems="center" spacing={1}>
                       {isDeleted && (
@@ -864,6 +959,18 @@ export const ProductsPage = () => {
                           size="small"
                           variant="outlined"
                           sx={{ height: 20, fontSize: "0.6rem" }}
+                        />
+                      )}
+                      {!isVisible && (
+                        <Chip
+                          label="CATÁLOGO"
+                          size="small"
+                          color="default"
+                          sx={{
+                            height: 20,
+                            fontSize: "0.6rem",
+                            bgcolor: "#eee",
+                          }}
                         />
                       )}
                       <Box>
@@ -1028,7 +1135,7 @@ export const ProductsPage = () => {
             {products.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={canManage ? 7 : 5}
+                  colSpan={canManage ? 8 : 6} // 🔥 Ajustado el colspan
                   align="center"
                   sx={{ py: 5 }}
                 >
@@ -1174,7 +1281,6 @@ export const ProductsPage = () => {
           </DialogTitle>
           <DialogContent dividers>
             <Grid container spacing={2}>
-              {/* SECCIÓN 1: DATOS GENERALES */}
               <Grid item xs={12}>
                 <Typography
                   variant="overline"
@@ -1184,7 +1290,6 @@ export const ProductsPage = () => {
                   Datos Generales
                 </Typography>
               </Grid>
-
               <Grid item xs={12} sm={8}>
                 <TextField
                   label="Nombre del Producto *"
@@ -1205,10 +1310,8 @@ export const ProductsPage = () => {
                     setFormData({ ...formData, sku: e.target.value })
                   }
                   disabled={isEditing}
-                  helperText={isEditing ? "El SKU no se puede modificar" : ""}
                 />
               </Grid>
-
               <Grid item xs={12}>
                 <TextField
                   label="Descripción"
@@ -1221,7 +1324,6 @@ export const ProductsPage = () => {
                   }
                 />
               </Grid>
-
               <Grid item xs={6} sm={4}>
                 <TextField
                   label="Código Barras"
@@ -1252,29 +1354,23 @@ export const ProductsPage = () => {
                   options={units}
                 />
               </Grid>
-
-              {/* TABLA DE STOCK (SOLO EDICIÓN) */}
               {isEditing && (
                 <Grid item xs={12}>
                   <StockPerBranchTable stocks={stockDetails} />
                 </Grid>
               )}
-
               <Grid item xs={12}>
                 <Divider sx={{ my: 1 }} />
               </Grid>
-
-              {/* SECCIÓN 2: PRECIOS */}
               <Grid item xs={12}>
                 <Typography
                   variant="overline"
                   color="primary"
                   fontWeight="bold"
                 >
-                  Precios y Costos
+                  Precios
                 </Typography>
               </Grid>
-
               <Grid item xs={6} sm={3}>
                 <CustomSelect
                   label="Moneda"
@@ -1316,10 +1412,8 @@ export const ProductsPage = () => {
                   disabled
                   fullWidth
                   value={Number(formData.cost_price).toFixed(2)}
-                  helperText="Cálculo automático"
                 />
               </Grid>
-
               <Grid item xs={4} sm={4}>
                 <TextField
                   label="Margen %"
@@ -1351,12 +1445,9 @@ export const ProductsPage = () => {
                   InputProps={{ readOnly: true }}
                 />
               </Grid>
-
               <Grid item xs={12}>
                 <Divider sx={{ my: 1 }} />
               </Grid>
-
-              {/* SECCIÓN 3: OTROS */}
               <Grid item xs={12} sm={6}>
                 <CustomSelect
                   label="Proveedor"
@@ -1387,14 +1478,14 @@ export const ProductsPage = () => {
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setOpen(false)}>Cancelar</Button>
-            <Button type="submit" variant="contained" size="large">
-              Guardar Producto
+            <Button type="submit" variant="contained">
+              Guardar
             </Button>
           </DialogActions>
         </form>
       </Dialog>
 
-      {/* MODAL IMPORTACION (COMPLETO) */}
+      {/* MODAL IMPORTACION (ACTUALIZADO: Todos los campos + Checkbox) */}
       <Dialog
         open={importModalOpen}
         onClose={() => setImportModalOpen(false)}
@@ -1438,7 +1529,45 @@ export const ProductsPage = () => {
                       skuPrefix: e.target.value,
                     })
                   }
-                  helperText="Ej: 123 -> MOT-123"
+                />
+              </Grid>
+
+              {/* 🔥 NUEVOS CONTROLES */}
+              <Grid item xs={12} sm={6}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={importConfig.importAsHidden}
+                      onChange={(e) =>
+                        setImportConfig({
+                          ...importConfig,
+                          importAsHidden: e.target.checked,
+                        })
+                      }
+                    />
+                  }
+                  label="Importar solo a Catálogo (Oculto)"
+                />
+                <Typography
+                  variant="caption"
+                  display="block"
+                  color="text.secondary"
+                >
+                  Si se marca, los productos nuevos NO aparecerán en 'Mis
+                  Productos' hasta que los actives.
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <CustomSelect
+                  label="Moneda por Defecto"
+                  value={importConfig.currency}
+                  onChange={(e: any) =>
+                    setImportConfig({
+                      ...importConfig,
+                      currency: e.target.value,
+                    })
+                  }
+                  options={CURRENCY_OPTIONS}
                 />
               </Grid>
 
@@ -1555,7 +1684,7 @@ export const ProductsPage = () => {
               </Grid>
             </Grid>
           ) : (
-            // --- PASO 2: MAPEO DE COLUMNAS ---
+            // --- PASO 2: MAPEO DE COLUMNAS (COMPLETO) ---
             <>
               <Typography variant="body2" sx={{ mb: 2 }}>
                 Indica qué columna del Excel corresponde a cada dato del

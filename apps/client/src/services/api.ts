@@ -222,13 +222,19 @@ export const inventoryService = {
     },
 
     // Productos (CRUD Completo)
-    getProducts: async (page = 1, limit = 10, search = '', categoryId = '', providerId = '', withDeleted = false) => {
+    getProducts: async (page = 1, limit = 10, search = '', categoryId = '', providerId = '', withDeleted = false, showHidden = false) => {
         const token = localStorage.getItem('token');
         const response = await api.get('/inventory/products', {
             // Axios arma la query string automáticamente con estos params
-            params: { page, limit, search, categoryId, providerId, withDeleted },
+            params: { page, limit, search, categoryId, providerId, withDeleted, showHidden },
             headers: { Authorization: `Bearer ${token}` }
         });
+        return response.data;
+    },
+
+    toggleProductVisibility: async (id: string) => {
+        // Agregamos /inventory al principio
+        const response = await api.patch(`/inventory/products/${id}/toggle-visibility`);
         return response.data;
     },
 

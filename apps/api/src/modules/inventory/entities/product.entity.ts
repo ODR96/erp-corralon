@@ -81,6 +81,9 @@ export class Product {
     @Column('boolean', { default: true })
     is_active: boolean;
 
+    @Column({ type: 'boolean', default: true })
+    is_visible: boolean;
+
     @CreateDateColumn() created_at: Date;
     @UpdateDateColumn() updated_at: Date;
     @DeleteDateColumn() deleted_at: Date;
