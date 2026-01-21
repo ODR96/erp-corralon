@@ -23,7 +23,7 @@ import {
 } from "@mui/material";
 import {
   Menu as MenuIcon,
-  MenuOpen as MenuOpenIcon, // Icono para cerrar
+  MenuOpen as MenuOpenIcon,
   Dashboard as DashboardIcon,
   Inventory as InventoryIcon,
   ShoppingCart as ShoppingCartIcon,
@@ -42,19 +42,19 @@ import {
 } from "@mui/icons-material";
 import { financeService } from "../../services/api";
 
-const DRAWER_WIDTH = 260; // Ancho expandido
-const MINI_DRAWER_WIDTH = 70; // Ancho colapsado (solo iconos)
+const DRAWER_WIDTH = 260;
+const MINI_DRAWER_WIDTH = 70;
 
 export const MainLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm")); // Detecta si es celular
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
   // Estados
   const [alertCount, setAlertCount] = useState(0);
-  const [mobileOpen, setMobileOpen] = useState(false); // Para celular (drawer temporal)
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true); // Para escritorio (drawer persistente)
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
 
   // Menús colapsables
@@ -64,7 +64,11 @@ export const MainLayout = () => {
     sales: false,
   });
 
-  // 👇 LÓGICA DE PERMISOS
+  // 🔥 CORRECCIÓN: Variable maestra para saber si mostrar texto o no
+  // En móvil SIEMPRE mostramos texto (cuando el drawer está abierto).
+  // En escritorio, depende del toggle.
+  const showFullDrawer = isMobile || isSidebarOpen;
+
   const userString = localStorage.getItem("user");
   const user = userString ? JSON.parse(userString) : null;
 
@@ -80,9 +84,12 @@ export const MainLayout = () => {
     if (hasPermission("finance.view")) {
       checkAlerts();
     }
-    // En pantallas chicas, arrancamos con sidebar cerrado
+    // En pantallas chicas, arrancamos con sidebar "lógico" cerrado para desktop
     if (isMobile) {
       setIsSidebarOpen(false);
+    } else {
+      // Opcional: Si agrandan la pantalla, restaurar
+      setIsSidebarOpen(true);
     }
   }, [isMobile]);
 
@@ -95,9 +102,8 @@ export const MainLayout = () => {
     }
   };
 
-  // Handlers
-  const handleDrawerToggle = () => setMobileOpen(!mobileOpen); // Celular
-  const handleSidebarToggle = () => setIsSidebarOpen(!isSidebarOpen); // Escritorio
+  const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
+  const handleSidebarToggle = () => setIsSidebarOpen(!isSidebarOpen);
 
   const handleMenuUser = (event: React.MouseEvent<HTMLElement>) =>
     setAnchorEl(event.currentTarget);
@@ -110,7 +116,7 @@ export const MainLayout = () => {
   };
 
   const handleSubmenuClick = (menuKey: string) => {
-    // Si la sidebar está colapsada y clicamos un menú padre, la expandimos automáticamente
+    // Si la sidebar está colapsada en DESKTOP y clicamos, la expandimos
     if (!isSidebarOpen && !isMobile) setIsSidebarOpen(true);
     setOpenMenus((prev) => ({ ...prev, [menuKey]: !prev[menuKey] }));
   };
@@ -190,7 +196,12 @@ export const MainLayout = () => {
         },
       ],
     },
-    { id: "system", text: "Sistema", isHeader: true, permission: "users.view" },
+    {
+      id: "system",
+      text: "Sistema",
+      isHeader: true,
+      permission: "users.view",
+    },
     {
       id: "users",
       text: "Usuarios",
@@ -225,11 +236,13 @@ export const MainLayout = () => {
           minHeight: "64px",
           px: 2,
           display: "flex",
-          justifyContent: isSidebarOpen ? "space-between" : "center",
+          // 🔥 CORRECCIÓN: Alineación según showFullDrawer
+          justifyContent: showFullDrawer ? "space-between" : "center",
           alignItems: "center",
         }}
       >
-        {isSidebarOpen ? (
+        {/* 🔥 CORRECCIÓN: Mostrar título si es móvil O si sidebar abierta */}
+        {showFullDrawer ? (
           <>
             <Box>
               <Typography
@@ -243,7 +256,6 @@ export const MainLayout = () => {
                 {user?.role?.name || "Usuario"}
               </Typography>
             </Box>
-            {/* Botón para colapsar DESDE DENTRO (opcional en desktop) */}
             {!isMobile && (
               <IconButton
                 onClick={handleSidebarToggle}
@@ -264,14 +276,14 @@ export const MainLayout = () => {
 
       <List
         component="nav"
-        sx={{ flexGrow: 1, pt: 1, px: isSidebarOpen ? 1 : 0.5 }}
+        sx={{ flexGrow: 1, pt: 1, px: showFullDrawer ? 1 : 0.5 }}
       >
         {menuStructure.map((item: any) => {
           if (!hasPermission(item.permission)) return null;
 
-          // Headers (SOLO visibles si está abierto)
           if (item.isHeader) {
-            return isSidebarOpen ? (
+            // 🔥 CORRECCIÓN: Header visible si showFullDrawer
+            return showFullDrawer ? (
               <Typography
                 key={item.id}
                 variant="caption"
@@ -293,10 +305,8 @@ export const MainLayout = () => {
 
           const isActive = !item.children && location.pathname === item.path;
 
-          // Render ITEM
           return (
             <Box key={item.id}>
-              {/* ITEM PADRE */}
               <ListItemButton
                 onClick={() =>
                   item.children
@@ -307,18 +317,20 @@ export const MainLayout = () => {
                 sx={{
                   mb: 0.5,
                   borderRadius: 1,
-                  justifyContent: isSidebarOpen ? "initial" : "center",
+                  // 🔥 CORRECCIÓN: Alineación
+                  justifyContent: showFullDrawer ? "initial" : "center",
                   px: 2.5,
                 }}
               >
                 <Tooltip
-                  title={!isSidebarOpen ? item.text : ""}
+                  title={!showFullDrawer ? item.text : ""}
                   placement="right"
                 >
                   <ListItemIcon
                     sx={{
                       minWidth: 0,
-                      mr: isSidebarOpen ? 2 : "auto",
+                      // 🔥 CORRECCIÓN: Margen
+                      mr: showFullDrawer ? 2 : "auto",
                       justifyContent: "center",
                       color: isActive ? "primary.main" : "inherit",
                     }}
@@ -327,7 +339,8 @@ export const MainLayout = () => {
                   </ListItemIcon>
                 </Tooltip>
 
-                {isSidebarOpen && (
+                {/* 🔥 CORRECCIÓN: Mostrar texto */}
+                {showFullDrawer && (
                   <ListItemText
                     primary={item.text}
                     primaryTypographyProps={{
@@ -336,13 +349,14 @@ export const MainLayout = () => {
                   />
                 )}
 
-                {isSidebarOpen &&
+                {/* 🔥 CORRECCIÓN: Mostrar flechas */}
+                {showFullDrawer &&
                   item.children &&
                   (openMenus[item.id] ? <ExpandLess /> : <ExpandMore />)}
               </ListItemButton>
 
-              {/* SUBMENU (Solo si sidebar abierta) */}
-              {item.children && isSidebarOpen && (
+              {/* 🔥 CORRECCIÓN: Submenú visible */}
+              {item.children && showFullDrawer && (
                 <Collapse in={openMenus[item.id]} timeout="auto" unmountOnExit>
                   <List component="div" disablePadding>
                     {item.children
@@ -354,6 +368,7 @@ export const MainLayout = () => {
                           selected={location.pathname === child.path}
                           onClick={() => {
                             navigate(child.path);
+                            // Cierra el drawer en móvil al hacer clic
                             if (isMobile) setMobileOpen(false);
                           }}
                         >
@@ -403,7 +418,6 @@ export const MainLayout = () => {
         }}
       >
         <Toolbar>
-          {/* Botón Mobile */}
           <IconButton
             color="inherit"
             edge="start"
@@ -413,7 +427,6 @@ export const MainLayout = () => {
             <MenuIcon />
           </IconButton>
 
-          {/* Botón Desktop (Colapsar/Expandir) */}
           <IconButton
             color="inherit"
             edge="start"
@@ -469,14 +482,14 @@ export const MainLayout = () => {
             display: { xs: "block", sm: "none" },
             "& .MuiDrawer-paper": {
               boxSizing: "border-box",
-              width: DRAWER_WIDTH,
+              width: DRAWER_WIDTH, // En móvil siempre ancho completo
             },
           }}
         >
           {drawerContent}
         </Drawer>
 
-        {/* Drawer Desktop (Permanente pero variable) */}
+        {/* Drawer Desktop (Permanente) */}
         <Drawer
           variant="permanent"
           sx={{
@@ -488,7 +501,7 @@ export const MainLayout = () => {
                 easing: theme.transitions.easing.sharp,
                 duration: theme.transitions.duration.enteringScreen,
               }),
-              overflowX: "hidden", // Evita scroll horizontal al colapsar
+              overflowX: "hidden",
             },
           }}
           open
