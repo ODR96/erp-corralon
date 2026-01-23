@@ -50,7 +50,7 @@ import {
 } from "@mui/icons-material";
 import { useNotification } from "../context/NotificationContext";
 import { inventoryService, settingsService } from "../services/api";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 // --- CONSTANTES ---
 const DELETED_ROW_STYLE = {
@@ -218,13 +218,21 @@ export const ProductsPage = () => {
   const { showNotification } = useNotification();
   const navigate = useNavigate();
 
+  const [searchParams] = useSearchParams(); // 👈 Hook para leer URL
+
+  // 🔥 DETECTAR MODO CONSULTA
+  const isReadOnly = searchParams.get("mode") === "readonly";
+
   // 🔐 PERMISOS
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const isSuperAdmin = !!user.is_super_admin;
-  const canManage =
+  const canManageOriginal =
     isSuperAdmin ||
     user.role?.name === "Admin" ||
     user.role?.permissions?.some((p: any) => p.slug === "products.manage");
+
+  // Si está en modo readonly, canManage es falso visualmente
+  const canManage = isReadOnly ? false : canManageOriginal;
 
   // --- ESTADOS PRINCIPALES ---
   const [products, setProducts] = useState<any[]>([]);
@@ -393,7 +401,7 @@ export const ProductsPage = () => {
         filterCat,
         filterProv,
         withDeleted,
-        showHidden // Enviamos el parámetro
+        showHidden, // Enviamos el parámetro
       );
       setProducts(res.data);
       setTotal(res.total);
@@ -406,7 +414,7 @@ export const ProductsPage = () => {
   const handleToggleStar = async (
     id: string,
     currentStatus: boolean,
-    e: any
+    e: any,
   ) => {
     e.stopPropagation(); // Evitar abrir el modal de edición
     try {
@@ -417,12 +425,12 @@ export const ProductsPage = () => {
         prev.map((p) => {
           if (p.id === id) return { ...p, is_visible: !currentStatus };
           return p;
-        })
+        }),
       );
 
       showNotification(
         currentStatus ? "Movido al Catálogo" : "Activado en Stock",
-        "info"
+        "info",
       );
     } catch (error) {
       showNotification("Error al cambiar estado", "error");
@@ -600,7 +608,7 @@ export const ProductsPage = () => {
   const handleHardDelete = async (id: string) => {
     if (
       confirm(
-        "⚠️ ¿Estás seguro? Esto eliminará el producto y SU HISTORIAL para siempre."
+        "⚠️ ¿Estás seguro? Esto eliminará el producto y SU HISTORIAL para siempre.",
       )
     ) {
       try {
@@ -610,7 +618,7 @@ export const ProductsPage = () => {
       } catch (err: any) {
         showNotification(
           "No se puede eliminar: Probablemente tenga stock o ventas asociadas.",
-          "error"
+          "error",
         );
       }
     }
@@ -706,14 +714,14 @@ export const ProductsPage = () => {
           file,
           selectedImportProvider,
           mappingData,
-          importConfig
+          importConfig,
         );
         totalCreated += res.stats?.created || 0;
         totalUpdated += res.stats?.updated || 0;
       }
       showNotification(
         `Éxito: ${totalCreated} nuevos, ${totalUpdated} actualizados.`,
-        "success"
+        "success",
       );
       loadProducts();
     } catch (err) {

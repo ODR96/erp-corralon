@@ -39,6 +39,8 @@ import {
   Output,
   RemoveCircle,
   ChevronLeft,
+  Search as SearchIcon, // 👈 Importamos la Lupa
+  ShoppingCartCheckout,
 } from "@mui/icons-material";
 import { financeService } from "../../services/api";
 
@@ -50,6 +52,10 @@ export const MainLayout = () => {
   const location = useLocation();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  const [dolarBlue, setDolarBlue] = useState<{
+    purchase: number;
+    sale: number;
+  } | null>(null);
 
   // Estados
   const [alertCount, setAlertCount] = useState(0);
@@ -79,6 +85,16 @@ export const MainLayout = () => {
     const myPermissions = user.role?.permissions || [];
     return myPermissions.some((p: any) => p.slug === requiredSlug);
   };
+
+  useEffect(() => {
+    // Fetch a la API gratuita
+    fetch("https://dolarapi.com/v1/dolares/blue")
+      .then((res) => res.json())
+      .then((data) => {
+        setDolarBlue({ purchase: data.compra, sale: data.venta });
+      })
+      .catch((err) => console.error("Error dolar:", err));
+  }, []);
 
   useEffect(() => {
     if (hasPermission("finance.view")) {
@@ -418,6 +434,7 @@ export const MainLayout = () => {
         }}
       >
         <Toolbar>
+          {/* Botón Mobile (Hamburguesa) */}
           <IconButton
             color="inherit"
             edge="start"
@@ -427,6 +444,7 @@ export const MainLayout = () => {
             <MenuIcon />
           </IconButton>
 
+          {/* Botón Desktop (Colapsar) */}
           <IconButton
             color="inherit"
             edge="start"
@@ -436,13 +454,57 @@ export const MainLayout = () => {
             {isSidebarOpen ? <MenuOpenIcon /> : <MenuIcon />}
           </IconButton>
 
+          {/* Título */}
           <Box sx={{ flexGrow: 1 }}>
             <Typography variant="h6" noWrap fontWeight="bold">
               Panel de Control
             </Typography>
           </Box>
 
-          <IconButton onClick={handleMenuUser} color="primary">
+          {dolarBlue && (
+            <Box
+              sx={{
+                display: { xs: "none", md: "flex" }, // Oculto en celular muy chico, visible en PC
+                alignItems: "center",
+                bgcolor: "success.dark",
+                color: "white",
+                px: 1.5,
+                py: 0.5,
+                borderRadius: 2,
+                mr: 2,
+                boxShadow: 1,
+              }}
+            >
+              <AttachMoney fontSize="small" />
+              <Typography variant="body2" fontWeight="bold">
+                Blue: ${dolarBlue.sale}
+              </Typography>
+            </Box>
+          )}
+
+          {/* 🔥 ATAJOS RÁPIDOS (NUEVO) */}
+          <Tooltip title="Consultar Precios">
+            <IconButton
+              color="inherit"
+              onClick={() => navigate("/inventory?mode=readonly")}
+            >
+              <SearchIcon />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="Nueva Venta (POS)">
+            <IconButton
+              color="inherit"
+              onClick={() => navigate("/sales/pos")}
+              sx={{ mr: 1 }}
+            >
+              <ShoppingCartCheckout />
+            </IconButton>
+          </Tooltip>
+
+          {/* Avatar Usuario */}
+          <IconButton onClick={handleMenuUser} color="inherit">
+            {/* Cambié color="primary" a "inherit" para que se vea blanco en la barra azul */}
             <AccountCircle fontSize="large" />
           </IconButton>
           <Menu

@@ -326,7 +326,7 @@ export const SettingsPage = () => {
                           onChange={(e) =>
                             handleChange(
                               "allow_negative_stock",
-                              e.target.checked
+                              e.target.checked,
                             )
                           }
                         />

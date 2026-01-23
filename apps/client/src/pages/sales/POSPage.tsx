@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useNavigate } from "react-router-dom"; // 👈 Importar hook de navegación
+import { useNavigate } from "react-router-dom";
 import {
   Box,
   Grid,
@@ -34,6 +34,11 @@ import {
   TableRow,
   TableCell,
   TableBody,
+  useMediaQuery,
+  useTheme,
+  Drawer,
+  Fab,
+  Badge, // 👈 Importamos componentes móviles
 } from "@mui/material";
 import {
   Search,
@@ -53,13 +58,14 @@ import {
   Visibility,
   ArrowBack,
   Close,
+  ShoppingCartCheckout,
+  WhatsApp, // Icono para el FAB
 } from "@mui/icons-material";
 import { useNotification } from "../../context/NotificationContext";
 import { api } from "../../services/api";
-// 👇 Importamos las nuevas funciones del generador
 import { generateSalePDF, getPdfUrl } from "../../utils/salePdfGenerator";
 
-// ... (Interfaces iguales que antes) ...
+// ... Interfaces ...
 interface Product {
   id: string;
   name: string;
@@ -82,10 +88,14 @@ interface Sale {
   customer_name: string;
   total: number;
   invoice_number: string;
+  details: any[]; // Agregado para tipado
 }
 
 export const POSPage = () => {
-  const navigate = useNavigate(); // 👈 Hook para salir
+  const navigate = useNavigate();
+  const theme = useTheme();
+  // 👇 Detectamos si es celular
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const { showNotification } = useNotification();
 
   // --- ESTADOS ---
@@ -94,9 +104,14 @@ export const POSPage = () => {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [saleType, setSaleType] = useState<"VENTA" | "PRESUPUESTO">("VENTA");
   const [settings, setSettings] = useState<any>({});
+
+  // Cheques
   const [checkBank, setCheckBank] = useState("");
   const [checkNumber, setCheckNumber] = useState("");
-  const [checkDate, setCheckDate] = useState(""); // YYYY-MM-DD
+  const [checkDate, setCheckDate] = useState("");
+
+  // Móvil
+  const [mobileCartOpen, setMobileCartOpen] = useState(false);
 
   // Cliente
   const [clientInputValue, setClientInputValue] = useState("");
@@ -110,12 +125,12 @@ export const POSPage = () => {
   const [budgetsModalOpen, setBudgetsModalOpen] = useState(false);
   const [successModalOpen, setSuccessModalOpen] = useState(false);
 
-  // 👇 NUEVO: Modal de Vista Previa de Impresión
+  // Impresión
   const [printPreviewOpen, setPrintPreviewOpen] = useState(false);
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null); // Referencia para imprimir directo
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  // Datos Pagos
+  // Pagos
   const [paymentMethod, setPaymentMethod] = useState("EFECTIVO");
   const [paymentReference, setPaymentReference] = useState("");
   const [installments, setInstallments] = useState(1);
@@ -150,7 +165,7 @@ export const POSPage = () => {
               price: Number(p.sale_price) || 0,
               stock: Number(p.total_stock) || 0,
               category: p.category?.name || "General",
-            }))
+            })),
           );
         }
         setSettings(resSettings.data || {});
@@ -178,12 +193,9 @@ export const POSPage = () => {
     return () => clearTimeout(timeoutId);
   }, [clientInputValue]);
 
-  // --- LOGICA CARRITO (Igual que antes) ---
+  // --- LOGICA CARRITO ---
   const addToCart = (product: Product, qty: number = 1) => {
-    // 👇 LEEMOS LA CONFIGURACIÓN
     const allowNegative = settings.allow_negative_stock;
-
-    // 👇 SOLO BLOQUEAMOS SI LA CONFIGURACIÓN DICE "FALSE" (NO PERMITIR)
     if (saleType === "VENTA" && product.stock <= 0 && !allowNegative) {
       showNotification("¡Sin stock!", "error");
       return;
@@ -192,7 +204,6 @@ export const POSPage = () => {
     setCart((prev) => {
       const existing = prev.find((item) => item.id === product.id);
       if (existing) {
-        // 👇 AQUÍ TAMBIÉN AGREGAMOS EL "!allowNegative"
         if (
           saleType === "VENTA" &&
           existing.quantity + qty > product.stock &&
@@ -208,7 +219,7 @@ export const POSPage = () => {
                 quantity: item.quantity + qty,
                 subtotal: (item.quantity + qty) * item.price,
               }
-            : item
+            : item,
         );
       }
       return [
@@ -216,18 +227,18 @@ export const POSPage = () => {
         { ...product, quantity: qty, subtotal: qty * product.price },
       ];
     });
+
+    // Feedback visual en móvil (opcional)
+    if (isMobile) showNotification("Agregado al carrito", "success");
   };
 
   const updateQuantity = (id: string, delta: number) => {
-    const allowNegative = settings.allow_negative_stock; // 👇 Leemos config
-
+    const allowNegative = settings.allow_negative_stock;
     setCart((prev) =>
       prev.map((item) => {
         if (item.id === id) {
           const newQty = item.quantity + delta;
           if (newQty < 1) return item;
-
-          // 👇 SOLO BLOQUEAMOS SI NO SE PERMITE NEGATIVO
           if (saleType === "VENTA" && newQty > item.stock && !allowNegative) {
             showNotification("Tope stock", "warning");
             return item;
@@ -235,27 +246,29 @@ export const POSPage = () => {
           return { ...item, quantity: newQty, subtotal: newQty * item.price };
         }
         return item;
-      })
+      }),
     );
+  };
+
+  const deleteFromCart = (id: string) => {
+    setCart((prev) => prev.filter((i) => i.id !== id));
   };
 
   const subtotal = useMemo(
     () => cart.reduce((acc, item) => acc + item.subtotal, 0),
-    [cart]
+    [cart],
   );
   const interestAmount = useMemo(
     () =>
       paymentMethod === "CREDITO" && interestPercent > 0
         ? (subtotal * interestPercent) / 100
         : 0,
-    [subtotal, paymentMethod, interestPercent]
+    [subtotal, paymentMethod, interestPercent],
   );
   const total = subtotal + interestAmount;
 
   // --- CLIENTE & PRESUPUESTOS ---
   const handleCreateClient = async () => {
-    /* ... Código igual al anterior ... */
-    // (Si lo necesitas completo dímelo, resumo para no hacer el código infinito)
     try {
       const res = await api.post("/sales/clients", newClientData);
       setSelectedClient(res.data);
@@ -304,8 +317,6 @@ export const POSPage = () => {
 
   const handleGoToClientProfile = () => {
     if (selectedClient) {
-      // Navegamos al perfil del cliente (Asumiendo que esta ruta existirá)
-      // Puedes abrir en nueva pestaña para no perder la venta:
       window.open(`/sales/clients/${selectedClient.id}`, "_blank");
     }
   };
@@ -316,7 +327,7 @@ export const POSPage = () => {
     if (paymentMethod === "CUENTA_CORRIENTE" && !selectedClient) {
       showNotification(
         "Cuenta Corriente requiere cliente registrado.",
-        "error"
+        "error",
       );
       return;
     }
@@ -347,7 +358,7 @@ export const POSPage = () => {
               bank_name: checkBank,
               number: checkNumber,
               payment_date: checkDate,
-              amount: total, // Asumimos que el cheque cubre el total exacto
+              amount: total,
             }
           : undefined,
     };
@@ -376,60 +387,179 @@ export const POSPage = () => {
       setCheckBank("");
       setCheckNumber("");
       setCheckDate("");
+      setMobileCartOpen(false); // Cerrar drawer en móvil
     } catch (error: any) {
       showNotification(error.response?.data?.message || "Error", "error");
     }
   };
 
-  // --- LÓGICA DE IMPRESIÓN / VISTA PREVIA ---
+  // --- IMPRESIÓN ---
   const handleOpenPreview = (overrideFormat?: "A4" | "80mm") => {
     if (!lastSaleData) return;
     const printSettings = overrideFormat
       ? { ...settings, printer_format: overrideFormat }
       : settings;
 
-    // 1. Generamos el DOC (Sin guardar)
     const doc = generateSalePDF(
       lastSaleData,
       lastSaleData.items,
-      printSettings
+      printSettings,
     );
-
-    // 2. Obtenemos URL Blob
     const url = getPdfUrl(doc);
     setPdfBlobUrl(url);
-
-    // 3. Abrimos Modal de Preview
     setPrintPreviewOpen(true);
-    setSuccessModalOpen(false); // Cerramos el de éxito
+    setSuccessModalOpen(false);
   };
 
   const handlePrintFromIframe = () => {
-    // Intentamos forzar la impresión del iframe
     if (iframeRef.current && iframeRef.current.contentWindow) {
       iframeRef.current.contentWindow.print();
     }
   };
 
   const filteredProducts = products.filter((p) =>
-    p.name.toLowerCase().includes(searchTerm.toLowerCase())
+    p.name.toLowerCase().includes(searchTerm.toLowerCase()),
+  );
+
+  // 🔥 COMPONENTE REUTILIZABLE: TICKET
+  // Este bloque lo usamos tanto en el panel derecho de PC como en el Drawer de Móvil
+  const TicketContent = () => (
+    <Box display="flex" flexDirection="column" height="100%">
+      <Box
+        display="flex"
+        justifyContent="space-between"
+        alignItems="center"
+        mb={2}
+      >
+        <Typography
+          variant="h5"
+          fontWeight="bold"
+          display="flex"
+          alignItems="center"
+          gap={1}
+        >
+          {saleType === "VENTA" ? <ShoppingCart /> : <Description />}
+          {saleType === "VENTA" ? "Ticket Venta" : "Presupuesto"}
+        </Typography>
+        {isMobile && (
+          <IconButton onClick={() => setMobileCartOpen(false)}>
+            <Close />
+          </IconButton>
+        )}
+      </Box>
+      <Divider />
+      <List sx={{ flex: 1, overflowY: "auto" }}>
+        {cart.map((item) => (
+          <ListItem key={item.id} divider sx={{ px: 0 }}>
+            <Box width="100%">
+              <Box display="flex" justifyContent="space-between">
+                <Typography variant="subtitle2" noWrap sx={{ maxWidth: 180 }}>
+                  {item.name}
+                </Typography>
+                <Typography variant="subtitle2" fontWeight="bold">
+                  ${(item.price * item.quantity).toLocaleString()}
+                </Typography>
+              </Box>
+              <Box display="flex" justifyContent="space-between" mt={1}>
+                <Box display="flex" alignItems="center" gap={1}>
+                  <IconButton
+                    size="small"
+                    onClick={() => updateQuantity(item.id, -1)}
+                  >
+                    <Remove fontSize="small" />
+                  </IconButton>
+                  <Typography>{item.quantity}</Typography>
+                  <IconButton
+                    size="small"
+                    onClick={() => updateQuantity(item.id, 1)}
+                  >
+                    <Add fontSize="small" />
+                  </IconButton>
+                </Box>
+                <IconButton
+                  color="error"
+                  size="small"
+                  onClick={() => deleteFromCart(item.id)}
+                >
+                  <Delete fontSize="small" />
+                </IconButton>
+              </Box>
+            </Box>
+          </ListItem>
+        ))}
+        {cart.length === 0 && (
+          <Box textAlign="center" py={4} color="text.secondary">
+            <ShoppingCartCheckout sx={{ fontSize: 60, opacity: 0.2 }} />
+            <Typography>Carrito vacío</Typography>
+          </Box>
+        )}
+      </List>
+      <Box mt="auto" pt={2}>
+        {interestAmount > 0 && (
+          <Box display="flex" justifyContent="space-between" color="error.main">
+            <Typography>Recargo</Typography>
+            <Typography>+${interestAmount.toLocaleString()}</Typography>
+          </Box>
+        )}
+        <Box display="flex" justifyContent="space-between" mb={2}>
+          <Typography variant="h5" fontWeight="bold">
+            Total
+          </Typography>
+          <Typography variant="h5" fontWeight="bold" color="primary">
+            ${total.toLocaleString()}
+          </Typography>
+        </Box>
+        <Button
+          variant="contained"
+          size="large"
+          fullWidth
+          disabled={cart.length === 0}
+          onClick={() => setPaymentModalOpen(true)}
+          color={saleType === "PRESUPUESTO" ? "warning" : "primary"}
+          sx={{ py: 1.5, fontSize: "1.2rem" }}
+        >
+          {saleType === "PRESUPUESTO" ? "GUARDAR" : "COBRAR"}
+        </Button>
+      </Box>
+    </Box>
   );
 
   return (
-    <Box sx={{ height: "calc(100vh - 100px)", display: "flex", gap: 2, p: 2 }}>
-      {/* IZQUIERDA: PRODUCTOS */}
-      <Box sx={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
-        <Paper sx={{ p: 2, display: "flex", gap: 2, alignItems: "center" }}>
-          {/* 👇 BOTÓN SALIR / VOLVER */}
-          <Tooltip title="Salir al Dashboard">
-            <IconButton onClick={() => navigate("/")} sx={{ mr: 1 }}>
+    // 🔥 LAYOUT RESPONSIVE: Columna en móvil, Fila en PC
+    <Box
+      sx={{
+        height: "calc(100vh - 80px)",
+        display: "flex",
+        flexDirection: { xs: "column", md: "row" },
+        gap: 2,
+        p: { xs: 1, md: 2 },
+      }}
+    >
+      {/* IZQUIERDA: PRODUCTOS (Ocupa todo en móvil) */}
+      <Box
+        sx={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+          height: "100%",
+        }}
+      >
+        {/* BARRA SUPERIOR */}
+        <Paper sx={{ p: 2, display: "flex", gap: 1, alignItems: "center" }}>
+          <Tooltip title="Salir">
+            <IconButton
+              onClick={() => navigate("/")}
+              size={isMobile ? "small" : "medium"}
+            >
               <ArrowBack />
             </IconButton>
           </Tooltip>
 
           <TextField
             fullWidth
-            placeholder="Buscar producto..."
+            size="small"
+            placeholder={isMobile ? "Buscar..." : "Buscar producto..."}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             InputProps={{
@@ -439,79 +569,112 @@ export const POSPage = () => {
                 </InputAdornment>
               ),
             }}
-            autoFocus
           />
 
-          <FormControlLabel
-            control={
-              <Switch
-                checked={saleType === "PRESUPUESTO"}
-                onChange={(e) =>
-                  setSaleType(e.target.checked ? "PRESUPUESTO" : "VENTA")
-                }
-              />
-            }
-            label={saleType === "PRESUPUESTO" ? "PRESUPUESTO" : "VENTA"}
-            sx={{
-              bgcolor:
-                saleType === "PRESUPUESTO" ? "warning.light" : "transparent",
-              px: 2,
-              borderRadius: 1,
-            }}
-          />
+          {!isMobile && (
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={saleType === "PRESUPUESTO"}
+                  onChange={(e) =>
+                    setSaleType(e.target.checked ? "PRESUPUESTO" : "VENTA")
+                  }
+                />
+              }
+              label={saleType === "PRESUPUESTO" ? "PRESUP" : "VENTA"}
+            />
+          )}
           <Tooltip title="Recuperar Presupuesto">
-            <IconButton
-              color="primary"
-              onClick={handleOpenBudgets}
-              sx={{ border: "1px solid", borderColor: "primary.main" }}
-            >
+            <IconButton color="primary" onClick={handleOpenBudgets}>
               <Restore />
             </IconButton>
           </Tooltip>
         </Paper>
 
-        <Box sx={{ flex: 1, overflowY: "auto" }}>
-          <Grid container spacing={2}>
+        {/* Switch móvil para ahorrar espacio */}
+        {isMobile && (
+          <Box display="flex" justifyContent="center">
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={saleType === "PRESUPUESTO"}
+                  onChange={(e) =>
+                    setSaleType(e.target.checked ? "PRESUPUESTO" : "VENTA")
+                  }
+                />
+              }
+              label={
+                <Typography variant="caption" fontWeight="bold">
+                  {saleType}
+                </Typography>
+              }
+            />
+          </Box>
+        )}
+
+        {/* GRILLA DE PRODUCTOS (Scrollable) */}
+        <Box sx={{ flex: 1, overflowY: "auto", pb: 10 }}>
+          <Grid container spacing={1}>
             {filteredProducts.map((p) => {
-              // 1. Aquí definimos si se bloquea o no (YA LO TIENES BIEN)
               const isBlocked =
                 saleType === "VENTA" &&
                 p.stock <= 0 &&
                 !settings.allow_negative_stock;
-
               return (
                 <Grid item xs={12} sm={6} md={4} lg={3} key={p.id}>
                   <Card
                     sx={{
-                      // 👇 2. USAR isBlocked AQUÍ
                       opacity: isBlocked ? 0.6 : 1,
                       bgcolor: isBlocked ? "#f5f5f5" : "white",
+                      display: "flex",
+                      flexDirection: "column",
+                      height: "100%",
                     }}
                   >
                     <CardActionArea
                       onClick={() => addToCart(p)}
-                      // 👇 3. USAR isBlocked AQUÍ (Esto es lo que impide el click)
                       disabled={isBlocked}
+                      sx={{ flex: 1, p: 1 }}
                     >
-                      <CardContent>
-                        <Typography variant="h6" noWrap>
-                          {p.name}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          Stock: {p.stock}
-                        </Typography>
+                      <CardContent sx={{ p: 1, "&:last-child": { pb: 1 } }}>
+                        <Box
+                          display="flex"
+                          justifyContent="space-between"
+                          alignItems="start"
+                        >
+                          <Typography
+                            variant="subtitle2"
+                            fontWeight="bold"
+                            lineHeight={1.2}
+                          >
+                            {p.name}
+                          </Typography>
+                          <Chip
+                            label={p.stock}
+                            size="small"
+                            color={p.stock < 1 ? "error" : "default"}
+                            variant="outlined"
+                            sx={{ height: 20, fontSize: "0.7rem", ml: 1 }}
+                          />
+                        </Box>
+
                         <Typography
-                          variant="h5"
+                          variant="h6"
                           color="primary"
                           fontWeight="bold"
                           mt={1}
                         >
                           ${p.price.toLocaleString()}
                         </Typography>
-
-                        {/* 👇 4. USAR isBlocked AQUÍ TAMBIÉN (Para mostrar u ocultar el cartel) */}
                         {isBlocked && (
-                          <Chip label="AGOTADO" color="error" size="small" />
+                          <Typography
+                            variant="caption"
+                            color="error"
+                            fontWeight="bold"
+                          >
+                            SIN STOCK
+                          </Typography>
                         )}
                       </CardContent>
                     </CardActionArea>
@@ -523,108 +686,74 @@ export const POSPage = () => {
         </Box>
       </Box>
 
-      {/* DERECHA: TICKET */}
-      <Paper
-        sx={{ width: 400, display: "flex", flexDirection: "column", p: 2 }}
-        elevation={3}
-      >
-        {/* ... (Sección Ticket Igual) ... */}
-        <Typography
-          variant="h5"
-          fontWeight="bold"
-          mb={2}
-          display="flex"
-          alignItems="center"
-          gap={1}
+      {/* DERECHA (SOLO PC): TICKET FIJO */}
+      {!isMobile && (
+        <Paper
+          sx={{ width: 400, p: 2, display: "flex", flexDirection: "column" }}
+          elevation={3}
         >
-          {saleType === "VENTA" ? <ShoppingCart /> : <Description />}{" "}
-          {saleType === "VENTA" ? "Ticket Venta" : "Presupuesto"}
-        </Typography>
-        <Divider />
-        <List sx={{ flex: 1, overflowY: "auto" }}>
-          {cart.map((item) => (
-            <ListItem key={item.id} divider sx={{ px: 0 }}>
-              <Box width="100%">
-                <Box display="flex" justifyContent="space-between">
-                  <Typography variant="subtitle2" noWrap sx={{ maxWidth: 200 }}>
-                    {item.name}
-                  </Typography>
-                  <Typography variant="subtitle2" fontWeight="bold">
-                    ${(item.price * item.quantity).toLocaleString()}
-                  </Typography>
-                </Box>
-                <Box display="flex" justifyContent="space-between" mt={1}>
-                  <Box display="flex" alignItems="center" gap={1}>
-                    <IconButton
-                      size="small"
-                      onClick={() => updateQuantity(item.id, -1)}
-                    >
-                      <Remove fontSize="small" />
-                    </IconButton>
-                    <Typography>{item.quantity}</Typography>
-                    <IconButton
-                      size="small"
-                      onClick={() => updateQuantity(item.id, 1)}
-                    >
-                      <Add fontSize="small" />
-                    </IconButton>
-                  </Box>
-                  <IconButton
-                    color="error"
-                    size="small"
-                    onClick={() =>
-                      setCart((prev) => prev.filter((i) => i.id !== item.id))
-                    }
-                  >
-                    <Delete fontSize="small" />
-                  </IconButton>
-                </Box>
-              </Box>
-            </ListItem>
-          ))}
-        </List>
-        <Box mb={2}>
-          {interestAmount > 0 && (
-            <Box
-              display="flex"
-              justifyContent="space-between"
-              color="error.main"
-            >
-              <Typography>Recargo</Typography>
-              <Typography>+${interestAmount.toLocaleString()}</Typography>
-            </Box>
-          )}
-          <Box display="flex" justifyContent="space-between">
-            <Typography variant="h4" fontWeight="bold">
-              Total
-            </Typography>
-            <Typography variant="h4" fontWeight="bold" color="primary">
-              ${total.toLocaleString()}
-            </Typography>
-          </Box>
-        </Box>
-        <Button
-          variant="contained"
-          size="large"
-          fullWidth
-          disabled={cart.length === 0}
-          onClick={() => setPaymentModalOpen(true)}
-          color={saleType === "PRESUPUESTO" ? "warning" : "primary"}
-          sx={{ py: 1.5, fontSize: "1.2rem" }}
-        >
-          {saleType === "PRESUPUESTO" ? "GENERAR PRESUPUESTO" : "COBRAR"}
-        </Button>
-      </Paper>
+          <TicketContent />
+        </Paper>
+      )}
+
+      {/* DERECHA (SOLO MÓVIL): DRAWER + FAB */}
+      {isMobile && (
+        <>
+          <Fab
+            color="primary"
+            aria-label="cart"
+            onClick={() => setMobileCartOpen(true)}
+            sx={{
+              position: "fixed",
+              bottom: 24,
+              right: 24,
+              width: 65,
+              height: 65,
+            }}
+          >
+            <Badge badgeContent={cart.length} color="error">
+              <ShoppingCartCheckout sx={{ fontSize: 28 }} />
+            </Badge>
+          </Fab>
+
+          <Drawer
+            anchor="bottom"
+            open={mobileCartOpen}
+            onClose={() => setMobileCartOpen(false)}
+            PaperProps={{
+              sx: {
+                height: "85vh",
+                borderTopLeftRadius: 20,
+                borderTopRightRadius: 20,
+                p: 2,
+              },
+            }}
+          >
+            <TicketContent />
+          </Drawer>
+        </>
+      )}
+
+      {/* --- MODALES --- */}
 
       {/* MODAL COBRO */}
       <Dialog
         open={paymentModalOpen}
         onClose={() => setPaymentModalOpen(false)}
+        fullScreen={isMobile} // 🔥 En móvil ocupa toda la pantalla
         fullWidth
         maxWidth="xs"
       >
         <DialogTitle>
           {saleType === "VENTA" ? "Finalizar Venta" : "Guardar Presupuesto"}
+          {isMobile && (
+            <IconButton
+              onClick={() => setPaymentModalOpen(false)}
+              sx={{ position: "absolute", right: 8, top: 8 }}
+            >
+              <Close />
+            </IconButton>
+          )}
         </DialogTitle>
         <DialogContent dividers>
           <Box textAlign="center" mb={3}>
@@ -633,6 +762,7 @@ export const POSPage = () => {
             </Typography>
           </Box>
 
+          {/* ... (Selectores de Cliente igual que antes) ... */}
           <Box mb={2} display="flex" alignItems="flex-start" gap={1}>
             <Autocomplete
               freeSolo
@@ -674,10 +804,8 @@ export const POSPage = () => {
                 <PersonAdd />
               </IconButton>
             </Tooltip>
-
-            {/* 👇 BOTÓN OJO (Visible si hay cliente seleccionado) */}
             {selectedClient && (
-              <Tooltip title="Ver Perfil de Cliente">
+              <Tooltip title="Ver Perfil">
                 <IconButton
                   color="primary"
                   onClick={handleGoToClientProfile}
@@ -691,14 +819,13 @@ export const POSPage = () => {
 
           {selectedClient && (
             <Chip
-              label={`Registrado: ${selectedClient.name}`}
+              label={`Cliente: ${selectedClient.name}`}
               onDelete={() => setSelectedClient(null)}
               color="success"
               sx={{ mb: 2 }}
             />
           )}
 
-          {/* ... (Selectores de pago iguales) ... */}
           {saleType === "VENTA" && (
             <>
               <FormControl fullWidth margin="normal">
@@ -733,7 +860,7 @@ export const POSPage = () => {
               </FormControl>
 
               {paymentMethod === "CREDITO" && (
-                <Grid container spacing={2} mt={0}>
+                <Grid container spacing={2}>
                   <Grid item xs={6}>
                     <TextField
                       label="Cuotas"
@@ -757,7 +884,7 @@ export const POSPage = () => {
                   </Grid>
                 </Grid>
               )}
-              {/* Opción A: TRANSFERENCIA (Solo referencia) */}
+
               {paymentMethod === "TRANSFERENCIA" && (
                 <TextField
                   label="N° Operación / Referencia"
@@ -768,13 +895,11 @@ export const POSPage = () => {
                 />
               )}
 
-              {/* Opción B: CHEQUE (Datos completos) */}
               {paymentMethod === "CHEQUE" && (
                 <Grid container spacing={2} sx={{ mt: 1 }}>
                   <Grid item xs={6}>
                     <TextField
                       label="Banco"
-                      placeholder="Ej: Galicia"
                       fullWidth
                       value={checkBank}
                       onChange={(e) => setCheckBank(e.target.value)}
@@ -790,13 +915,12 @@ export const POSPage = () => {
                   </Grid>
                   <Grid item xs={12}>
                     <TextField
-                      label="Fecha de Cobro"
+                      label="Fecha Cobro"
                       type="date"
                       fullWidth
                       InputLabelProps={{ shrink: true }}
                       value={checkDate}
                       onChange={(e) => setCheckDate(e.target.value)}
-                      helperText="Fecha en la que se podrá depositar"
                     />
                   </Grid>
                 </Grid>
@@ -824,6 +948,7 @@ export const POSPage = () => {
         onClose={() => setBudgetsModalOpen(false)}
         fullWidth
         maxWidth="md"
+        fullScreen={isMobile}
       >
         <DialogTitle>Recuperar Presupuesto</DialogTitle>
         <DialogContent dividers>
@@ -870,7 +995,7 @@ export const POSPage = () => {
         </DialogActions>
       </Dialog>
 
-      {/* MODAL ÉXITO VENTA - SELECCIÓN DE ACCIÓN */}
+      {/* MODAL ÉXITO */}
       <Dialog
         open={successModalOpen}
         onClose={() => setSuccessModalOpen(false)}
@@ -880,45 +1005,92 @@ export const POSPage = () => {
         <Box p={3} textAlign="center">
           <CheckCircle color="success" sx={{ fontSize: 60, mb: 2 }} />
           <Typography variant="h5" fontWeight="bold">
-            ¡Operación Exitosa!
+            ¡Venta Registrada!
           </Typography>
           <Typography variant="body1" color="text.secondary" mb={3}>
             #{lastSaleData?.invoice_number}
           </Typography>
 
           <Grid container spacing={2}>
-            <Grid item xs={12}>
-              <Button
-                variant="contained"
-                fullWidth
-                startIcon={<Print />}
-                onClick={() => handleOpenPreview()}
-                sx={{ py: 1.5 }}
-              >
-                VISTA PREVIA / IMPRIMIR
-              </Button>
-            </Grid>
-            {/* Botones rápidos específicos */}
-            <Grid item xs={6}>
-              <Button
-                variant="outlined"
-                size="small"
-                fullWidth
-                onClick={() => handleOpenPreview("80mm")}
-              >
-                Ticket 80mm
-              </Button>
-            </Grid>
-            <Grid item xs={6}>
-              <Button
-                variant="outlined"
-                size="small"
-                fullWidth
-                onClick={() => handleOpenPreview("A4")}
-              >
-                Hoja A4
-              </Button>
-            </Grid>
+            {/* 👇 LÓGICA INTELEGENTE PARA CELULAR */}
+            {isMobile && navigator.share ? (
+              <Grid item xs={12}>
+                <Button
+                  variant="contained"
+                  fullWidth
+                  size="large"
+                  color="success"
+                  startIcon={<WhatsApp />} // Importa WhatsApp de @mui/icons-material
+                  onClick={async () => {
+                    // 1. Generar PDF
+                    const doc = generateSalePDF(
+                      lastSaleData,
+                      lastSaleData.items,
+                      settings,
+                    );
+                    const blob = doc.output("blob");
+                    const file = new File(
+                      [blob],
+                      `Ticket_${lastSaleData.invoice_number}.pdf`,
+                      { type: "application/pdf" },
+                    );
+
+                    // 2. Intentar Compartir Nativamente
+                    try {
+                      await navigator.share({
+                        title: "Comprobante de Venta",
+                        text: `Hola ${lastSaleData.customer_name}, aquí tienes tu comprobante.`,
+                        files: [file],
+                      });
+                    } catch (err) {
+                      console.log("No se pudo compartir o se canceló");
+                    }
+                  }}
+                  sx={{ py: 1.5 }}
+                >
+                  ENVIAR A WHATSAPP
+                </Button>
+              </Grid>
+            ) : (
+              // Si es PC, mostramos el botón clásico de Imprimir
+              <Grid item xs={12}>
+                <Button
+                  variant="contained"
+                  fullWidth
+                  startIcon={<Print />}
+                  onClick={() => handleOpenPreview()}
+                  sx={{ py: 1.5 }}
+                >
+                  VISTA PREVIA / IMPRIMIR
+                </Button>
+              </Grid>
+            )}
+
+            {/* Botones secundarios */}
+            {!isMobile && (
+              <>
+                <Grid item xs={6}>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    fullWidth
+                    onClick={() => handleOpenPreview("80mm")}
+                  >
+                    Ticket 80mm
+                  </Button>
+                </Grid>
+                <Grid item xs={6}>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    fullWidth
+                    onClick={() => handleOpenPreview("A4")}
+                  >
+                    Hoja A4
+                  </Button>
+                </Grid>
+              </>
+            )}
 
             <Grid item xs={12}>
               <Button
@@ -932,13 +1104,13 @@ export const POSPage = () => {
           </Grid>
         </Box>
       </Dialog>
-
-      {/* 👇 NUEVO: MODAL VISTA PREVIA PDF */}
+      {/* MODAL VISTA PREVIA PDF */}
       <Dialog
         open={printPreviewOpen}
         onClose={() => setPrintPreviewOpen(false)}
         fullWidth
         maxWidth="md"
+        fullScreen={isMobile}
       >
         <DialogTitle
           sx={{
@@ -955,7 +1127,7 @@ export const POSPage = () => {
               onClick={handlePrintFromIframe}
               sx={{ mr: 1 }}
             >
-              IMPRIMIR AHORA
+              IMPRIMIR
             </Button>
             <IconButton onClick={() => setPrintPreviewOpen(false)}>
               <Close />
@@ -976,7 +1148,7 @@ export const POSPage = () => {
         </DialogContent>
       </Dialog>
 
-      {/* MODAL CLIENTE NUEVO (Igual que antes) */}
+      {/* MODAL CLIENTE NUEVO */}
       <Dialog
         open={newClientModalOpen}
         onClose={() => setNewClientModalOpen(false)}
